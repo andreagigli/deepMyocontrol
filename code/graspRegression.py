@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import sys
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, LogisticRegression
 from sklearn.kernel_approximation import RBFSampler
 from sklearn.metrics import r2_score, explained_variance_score, mean_absolute_error, mean_squared_error
 
@@ -354,8 +354,9 @@ def main():
 
     hyp_opt = args.hypopt
     if hyp_opt == True:
-        alphas_vec = [0.001, 0.01, 0.1, 0.5, 1]
-        gammas_vec = [0.001, 0.01, 0.1, 0.5, 1]
+        alphas_vec = np.logspace(-4, 4, 4)
+        gammas_vec = np.logspace(-4, 4, 4)
+        cs_vec = np.logspace(-4, 4, 4)
         out_fname = out_fname + '_hypOpt'
     else:
         alphas_vec = [1.0]
@@ -377,18 +378,18 @@ def main():
     rr_gof_each_seed = []
     for seed in range(n_seeds_rff): # average results over multiple rff seeds
 
-        pipe = Pipeline([
+        rr_pipe = Pipeline([
             ('RFF', RBFSampler(n_components=n_rff, random_state=seed)),
             ('RR', Ridge())
         ])
-        param_grid_pipe = [{'RFF__gamma': gammas_vec, 'RR__alpha': alphas_vec}, ]
-
-        # static-static
-        grid = GridSearchCV(pipe, cv = cv_splits, param_grid = param_grid_pipe,
-                            scoring = "r2", iid = False)
-        grid.fit(x_train, y_train)
-        rr_best_par_each_seed.append(np.array([grid.best_params_['RR__alpha'], grid.best_params_['RFF__gamma']]))
-        rr_y_pred_each_seed.append(grid.predict(x_test))
+        rr_param_grid_pipe = [{'RFF__gamma': gammas_vec, 'RR__alpha': alphas_vec}, ]
+        rr_grid = GridSearchCV(rr_pipe, cv = cv_splits,
+                                  param_grid = rr_param_grid_pipe,
+                                  scoring = "r2", iid = False)
+        rr_grid.fit(x_train, y_train)
+        rr_best_par_each_seed.append(np.array([rr_grid.best_params_['RR__alpha'],
+                                               rr_grid.best_params_['RFF__gamma']]))
+        rr_y_pred_each_seed.append(rr_grid.predict(x_test))
         rr_gof_each_seed.append(overallGoodnessOfFit(y_test,rr_y_pred_each_seed[-1], verbose=0)) # r2, expl_var, mae, rmse, nmae, nrmse
 
     # cumulative results rff for multiple seeds
@@ -397,8 +398,16 @@ def main():
     rr_gof = np.mean(rr_gof_each_seed, axis = 0)
 
 
-    
-
+    # logistic regression
+    logr_pipe = Pipeline([None, ('LOGR', LogisticRegression(max_iter=10000, tol=0.1))])
+    logr_param_grid_pipe = {'LOGR__C': cs_vec}
+    logr_grid = GridSearchCV(logr_pipe, cv=cv_splits,
+                             param_grid=logr_param_grid_pipe, scoring="r2",
+                             iid=False) # TODO fix scoring
+    logr_grid.fit(x_train, y_train)
+    logr_best_par =  np.array([logr_grid.best_params_['LOGR__C']])
+    logr_y_pred = logr_grid.predict(x_test)
+    logr_gof = overallGoodnessOfFit(y_test, logr_y_pred, verbose=0)  # r2, expl_var, mae, rmse, nmae, nrmse
 
 
 
