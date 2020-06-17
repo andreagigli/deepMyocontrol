@@ -11,6 +11,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import Ridge, LogisticRegression
 from sklearn.kernel_approximation import RBFSampler
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score, explained_variance_score, mean_absolute_error, \
     mean_squared_error, make_scorer
 
@@ -255,9 +256,50 @@ def multiple_log_reg(x_train, y_train, x_test, y_test, cv_splits, logr_pipe,
     return logr_y_pred, logr_gof, logr_best_par
 
 
-def goodness_of_fit(Ytrue, Ypred, verbose=0):
+def optimize_logr_C(Cs_vec, x_train, y_train, cv_splits):
+    '''
+    # TODO: make sure that the optimization is working, then delete the lines
+    # marked by a comment with exclamation mark
     '''
 
+    Cs_vec = [0.01,0.1,1,10]
+    logr_pipe = Pipeline([('dimred', None), ('LOGR', LogisticRegression(class_weight=None,
+                                                                        random_state=1,
+                                                                        n_jobs=None))])
+    logr_param_grid_pipe = {'LOGR__C': Cs_vec}
+    # custom scorer for logit-regression regressor:  flip (greater_is_better=False)
+    # default mserror (metrics.mean_squared_error) computed on the prediction
+    # probabilities (needs_proba=True) and not on the predictions of the model.
+    # 2 equivalent implementations of the scorer are reported.
+    custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
+                                        needs_proba=True)
+    def custom_logr_mse_score(clf, X, y_true):
+        y_pred_proba = clf.predict_proba(X)
+        error = mean_squared_error(y_true,y_pred_proba[:, 1])
+        score = -error
+        return score
+
+    logr_grid_d = []
+    for d in range(y_train.shape[1]):  # for each dof
+        logr_grid_d.append(GridSearchCV(logr_pipe, cv=cv_splits,
+                                        param_grid=logr_param_grid_pipe,
+                                        n_jobs=None, scoring=custom_logr_mse_score,
+                                        refit = False, verbose = True))
+        logr_grid_d[-1].fit(x_train, y_train[:, d])
+    # determine best C overall
+    logr_grid_d[0].cv_results_['mean_test_score']
+    logr_param_scores = np.zeros((len(logr_grid_d), len(logr_grid_d[0].cv_results_[
+                                                            'mean_test_score'])))
+    for i in range(len(logr_grid_d)):
+        logr_param_scores[i,:] = logr_grid_d[i].cv_results_['mean_test_score']
+    logr_best_C_overall = Cs_vec[np.argmax(np.sum(logr_param_scores, axis = 1))]
+
+    return logr_best_C_overall
+
+
+def goodness_of_fit(Ytrue, Ypred, verbose=0):
+    '''
+    Compute r2, expl_var, mae, rmse, nmae, nrmse for multiple regression.
     '''
 
     r2 = r2_score(Ytrue, Ypred,
@@ -404,7 +446,7 @@ def main():
     # split database
     x_train, y_train, x_test, y_test, cv_splits = split_data(data, train_reps,
                                                              test_reps,
-                                                             debug_plot = True,
+                                                             debug_plot = False,
                                                              subsample_train=True)
 
     ##### RFF-RR averaged over multiple seeds #####
@@ -426,7 +468,7 @@ def main():
     #                                            rr_grid.best_params_['RFF__gamma']]))
     #     rr_y_pred_each_seed.append(rr_grid.predict(x_test))
     #     rr_gof_each_seed.append(goodness_of_fit(y_test, rr_y_pred_each_seed[-1],
-    #                                             verbose=0))  # r2, expl_var, mae, rmse, nmae, nrmse
+    #                                             verbose=0))
     #
     # # cumulative results rff for multiple seeds
     # rr_best_par = np.median(rr_best_par_each_seed, axis=0)  # alpha, gamma
@@ -434,31 +476,96 @@ def main():
     # rr_gof = np.mean(rr_gof_each_seed, axis=0)
 
     ##### logistic regression (one instance per dof) #####
-
-    # custom scorer for logit-regression regressor:  flip (greater_is_better=False)
-    # default mserror (metrics.mean_squared_error) computed on the prediction
-    # probabilities (needs_proba=True) and not on the predictions of the model.
-    custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
-                                        needs_proba=True)
-    logr_pipe = Pipeline([('dimred', None), ('LOGR', LogisticRegression(class_weight=None,
-                                                                        random_state=1,
-                                                                        n_jobs=None))])
-    Cs_vec = [0.01,0.1,1,10] # TODO! REMOVE THIS, ADDED JUST FOR DEBUG
-    logr_param_grid_pipe = {'LOGR__C': Cs_vec}
-    logr_grid_d = []
+    # logr_best_C_overall = optimize_logr_C([0.1,1,10], x_train, y_train, cv_splits)
+    logr_best_C_overall = Cs_vec[0]
+    logr_d = []
+    logr_y_pred_d = []
     for d in range(y_train.shape[1]):  # for each dof
-        logr_grid_d.append(GridSearchCV(logr_pipe, cv=cv_splits,
-                                        param_grid=logr_param_grid_pipe,
-                                        n_jobs=None, scoring=custom_logr_mse_score
-                                        # TODO: check
-                                        ))
-        logr_grid_d[-1].fit(x_train, y_train[:, d])
+        logr_d.append(Pipeline([('scaler', StandardScaler()),
+                                ('LOGR', LogisticRegression(C = logr_best_C_overall,
+                                                            class_weight=None,
+                                                            random_state=1,
+                                                            n_jobs=None))]))
+        logr_d[-1].fit(x_train, y_train[:, d]) # refit all the logr with the (same) best C
+        logr_y_pred_d.append(logr_d[-1].predict_proba(x_test))
+    logr_y_pred = np.hstack(logr_y_pred_d)
+    logr_gof = goodness_of_fit(y_test, logr_y_pred_d, verbose=0)
 
-    # determine best C overall
 
-    # logr_y_pred, logr_gof, logr_best_par = multiple_log_reg(x_train, y_train, x_test,
-    #                                                         y_test, cv_splits, logr_pipe,
-    #                                                         logr_param_grid_pipe)
+
+
+
+
+    # TESTING OUT LOGISTIC REGRESSION ON 1 DOF (SCALING/BALANCING/RFF)
+    # y_train_0 = y_train[:,0]
+    # y_test_0 = y_test[:,0]
+    #
+    # # logr = LogisticRegression(C=1, class_weight=None, random_state=1, n_jobs=None)
+    # # pipe = Pipeline([('dimred', None), ('LOGR', logr)])
+    # # pipe.fit(x_train, y_train_0)
+    # # y_pred_0 = pipe.predict(x_test)
+    # # y_pred_t_0 = pipe.predict(x_train)
+    # # plt.figure(); plt.plot(y_test_0); plt.plot(y_pred_0); plt.title("Prediction error "
+    # #                                                                 "unscaled unbalanced")
+    # # plt.figure(); plt.plot(y_train_0); plt.plot(y_pred_t_0); plt.title("Training error "
+    # #                                                                    "unscaled unbalanced")
+    #
+    #
+    # logr = LogisticRegression(C=1, class_weight=None, random_state=1, n_jobs=None)
+    # pipe = Pipeline([('scaler', StandardScaler()), ('LOGR', logr)])
+    # pipe.fit(x_train, y_train_0)
+    # y_pred_0 = pipe.predict(x_test)
+    # y_pred_t_0 = pipe.predict(x_train)
+    # plt.figure(); plt.plot(y_test_0); plt.plot(y_pred_0); plt.title("Prediction error "
+    #                                                                 "scaled unbalanced")
+    # plt.figure(); plt.plot(y_train_0); plt.plot(y_pred_t_0); plt.title("Training error "
+    #                                                                    "scaled unbalanced")
+    #
+    # custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
+    #                                     needs_proba=True)
+    #
+    # # # the balancing hinders performance
+    # # logr = LogisticRegression(C=1, class_weight='balanced', random_state=1, n_jobs=None)
+    # # pipe = Pipeline([('scaler', StandardScaler()), ('LOGR', logr)])
+    # # pipe.fit(x_train, y_train_0)
+    # # y_pred_0 = pipe.predict(x_test)
+    # # y_pred_t_0 = pipe.predict(x_train)
+    # # plt.figure(); plt.plot(y_test_0); plt.plot(y_pred_0); plt.title("Prediction error "
+    # #                                                                 "scaled balanced")
+    # # plt.figure(); plt.plot(y_train_0); plt.plot(y_pred_t_0); plt.title("Training error "
+    # #                                                                    "scaled balanced")
+    #
+    # # RFF IS GONE ALREADY, BUT IT DID NOT WORK. RFF + SCALING DID NOT WORK EITHER.
+
+
+    # TESTING OUT CUSTOM SCORERS. TODO: DELETE
+    # custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
+    #                                     needs_proba=True)
+    #
+    # def my_mse_scorer(clf, X, y_true):
+    #     y_pred_proba = clf.predict_proba(X)
+    #     error = mean_squared_error(y_true,y_pred_proba[:, 1])
+    #     score = -error
+    #     return score
+    #
+    # from  sklearn.metrics import accuracy_score
+    # def my_acc_scorer(clf, X, y_true):
+    #     y_pred = clf.predict(X)
+    #     score = accuracy_score(y_true,y_pred)
+    #     return score
+    #
+    # custom_logr_mse_score(pipe, x_train, y_train_0)
+    # custom_logr_mse_score(pipe, x_test, y_test_0)
+    # my_mse_scorer(pipe, x_train, y_train_0)
+    # my_mse_scorer(pipe, x_test, y_test_0)
+    #
+    # my_acc_scorer(pipe, x_train, y_train_0)
+    # my_acc_scorer(pipe, x_test, y_test_0)
+    # pipe.score(x_train, y_train_0)
+    # pipe.score(x_test, y_test_0)
+
+
+
 
     print('The end')
 
