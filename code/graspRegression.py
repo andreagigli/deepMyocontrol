@@ -56,7 +56,7 @@ def convert_label(label):
     1, medium wrap*, [1,0,1,1,1,1]
     2, lateral, [1,1,1,1,1,1]
     3, parallel extension*, [1,0,1,1,1,1]
-    4, tripod grasp*, [1,0,1,1,0,0]
+    4, tripod grasp, [1,0,1,1,0,0]
     5, power sphere*, [1,0,1,1,1,1]
     6, precision disk*, [1,0,1,1,1,1]
     7, prismatic pinch, [1,0,1,0,0,0]
@@ -302,34 +302,37 @@ def goodness_of_fit(Ytrue, Ypred, verbose=0):
     Compute r2, expl_var, mae, rmse, nmae, nrmse for multiple regression.
     '''
 
-    r2 = r2_score(Ytrue, Ypred,
+    metrics = {}
+    metrics["r2"] = r2_score(Ytrue, Ypred,
                   multioutput="raw_values")  # multioutput alternatives: "uniform_variance" or "variance_weighted"
-    r2 = np.mean(r2[r2 != 1])
-    expl_var = explained_variance_score(Ytrue, Ypred, multioutput="uniform_average")
+    metrics["r2"] = np.mean(metrics["r2"][metrics["r2"] != 1])
+    metrics["expl_var"] = explained_variance_score(Ytrue, Ypred,
+                                               multioutput="uniform_average")
     # average magnitude of the error (same unit as y)
-    mae = mean_absolute_error(Ytrue, Ypred, multioutput="uniform_average")
+    metrics["mae"] = mean_absolute_error(Ytrue, Ypred, multioutput="uniform_average")
     # average squared magnitude of the error (same unit as y), penalizes larger errors
-    rmse = np.mean(np.sqrt(mean_squared_error(Ytrue, Ypred, multioutput="raw_values")))
+    metrics["rmse"] = np.mean(mean_squared_error(Ytrue, Ypred, multioutput="raw_values",
+                                       squared=False))
     with np.errstate(divide='ignore', invalid='ignore'):
         # nmae = mae normalized over range(Ytrue) (for each channel) and averaged over all the outputs.
         # Analogous to mae, normalized over the range of ytrue to compare it with the nmae of other datasets with possibly different ranges.
         # Can be seen as the "avg magnitude of the error is 13% of the amplitude of ytrue".
-        nmae = np.mean(np.nan_to_num(
+        metrics["nmae"] = np.mean(np.nan_to_num(
             np.divide(mean_absolute_error(Ytrue, Ypred, multioutput="raw_values"),
                       np.ptp(Ytrue, axis=0))))
         # nmrse = rmse normalized over var(Ytrue) (for each channel) and averaged over all the outputs.
         # Analogous to the rmse, normalized over the variance of ytrue to compare it with the nrmse of other datasets with possibly different variance.
-        nrmse = np.mean(np.nan_to_num(
-            np.divide(np.sqrt(mean_squared_error(Ytrue, Ypred, multioutput="raw_values")),
-                      np.var(Ytrue, axis=0))))
+        metrics["nrmse"] = np.mean(np.nan_to_num(
+            np.divide(mean_squared_error(Ytrue, Ypred, multioutput="raw_values",
+                                         squared=False), np.var(Ytrue, axis=0))))
     if verbose == 1:
-        print("Coefficient of determination R2: " + str(r2))
-        print("Explained Variance: " + str(expl_var))
-        print("Mean Absolute Error: " + str(mae))
-        print("Mean Squared Error: " + str(rmse))
-        print("Range Normalized Mean Absolute Error: " + str(nmae))
-        print("Variance Normalized Mean Squared Error: " + str(nrmse))
-    return r2, expl_var, mae, rmse, nmae, nrmse
+        print("Coefficient of determination R2: " + str(metrics["r2"]))
+        print("Explained Variance: " + str(metrics["expl_var"]))
+        print("Mean Absolute Error: " + str(metrics["mae"]))
+        print("Mean Squared Error: " + str(metrics["rmse"]))
+        print("Range Normalized Mean Absolute Error: " + str(metrics["nmae"]))
+        print("Variance Normalized Mean Squared Error: " + str(metrics["nrmse"]))
+    return metrics
 
 
 def idxmask2binmask(m, coeff=1):
@@ -346,6 +349,40 @@ def idxmask2binmask(m, coeff=1):
     v = np.zeros(np.max(m) + 1)
     v[m] = 1 * coeff
     return v
+
+
+def quick_visualize_vec(data, title='', continue_on_fig = None):
+    '''
+    Multiple line subplots, one for each column (up to the 12th column).
+    If a figure handle is passed, the function will try to plot the data
+    on that function (num_subplots must be equal to num columns!).
+    '''
+
+    if len(data.shape) > 2:
+        print("Only 1 and 2d arrays are accepted")
+        return None
+    elif len(data.shape) == 1:
+        data = data[:, None]
+    if data.shape[1] > 12:
+        print("Up to 12 columns can be printed!")
+        return None
+    if continue_on_fig and len(continue_on_fig.axes) != data.shape[1]:
+        print("The number of data columns and of subplots passed must be the same!")
+        return None
+    n_subplot_cols = (data.shape[1]-1) //6 +1
+    n_subplot_rows = np.min([6,data.shape[1]])
+    if not continue_on_fig:
+        fig = plt.figure()
+        for i in range(1, data.shape[1]+1):
+            ax1 = fig.add_subplot(n_subplot_rows, n_subplot_cols, i)
+            ax1.plot(data[:,i-1])
+            plt.title(title)
+    else:
+        fig = continue_on_fig
+        for i in range(data.shape[1]):
+            fig.axes[i].plot(data[:,i])
+            plt.title(title)
+    return fig
 
 
 # TODO: delete this
@@ -450,46 +487,48 @@ def main():
                                                              subsample_train=True)
 
     ##### RFF-RR averaged over multiple seeds #####
-    # rr_best_par_each_seed = []
-    # rr_y_pred_each_seed = []
-    # rr_gof_each_seed = []
-    # for seed in range(n_seeds_rff):  # average results over multiple rff seeds
-    #
-    #     rr_pipe = Pipeline([
-    #         ('RFF', RBFSampler(n_components=n_rff, random_state=seed)),
-    #         ('RR', Ridge())
-    #     ])
-    #     rr_param_grid_pipe = [{'RFF__gamma': gammas_vec, 'RR__alpha': alphas_vec}, ]
-    #     rr_grid = GridSearchCV(rr_pipe, cv=cv_splits,
-    #                            param_grid=rr_param_grid_pipe,
-    #                            scoring="r2", iid=False)
-    #     rr_grid.fit(x_train, y_train)
-    #     rr_best_par_each_seed.append(np.array([rr_grid.best_params_['RR__alpha'],
-    #                                            rr_grid.best_params_['RFF__gamma']]))
-    #     rr_y_pred_each_seed.append(rr_grid.predict(x_test))
-    #     rr_gof_each_seed.append(goodness_of_fit(y_test, rr_y_pred_each_seed[-1],
-    #                                             verbose=0))
-    #
-    # # cumulative results rff for multiple seeds
-    # rr_best_par = np.median(rr_best_par_each_seed, axis=0)  # alpha, gamma
-    # rr_y_pred = np.mean(rr_y_pred_each_seed, axis=0)
-    # rr_gof = np.mean(rr_gof_each_seed, axis=0)
+    rr_best_par_seed = []
+    rr_y_pred_seed = []
+    rr_gof_seed = []
+    for seed in range(n_seeds_rff):  # average results over multiple rff seeds
+        rr_pipe = Pipeline([
+            ('RFF', RBFSampler(n_components=n_rff, random_state=seed)),
+            ('RR', Ridge())
+        ])
+        rr_param_grid_pipe = [{'RFF__gamma': gammas_vec, 'RR__alpha': alphas_vec}]
+        rr_grid = GridSearchCV(rr_pipe, cv=cv_splits,
+                               param_grid=rr_param_grid_pipe,
+                               scoring="neg_mean_squared_error", iid=False)
+        rr_grid.fit(x_train, y_train)
+        rr_best_par_seed.append(np.array([rr_grid.best_params_['RR__alpha'],
+                                               rr_grid.best_params_['RFF__gamma']]))
+        rr_y_pred_seed.append(rr_grid.predict(x_test))
+        rr_gof_seed.append(goodness_of_fit(y_test, rr_y_pred_seed[-1],
+                                                verbose=0)) # TODO: not working anymore (now it returns a dictionary..)
+    # cumulative results rff for multiple seeds
+    rr_best_par = np.median(rr_best_par_seed, axis=0)  # alpha, gamma
+    rr_y_pred = np.mean(rr_y_pred_seed, axis=0)
+    rr_gof = np.mean(rr_gof_seed, axis=0)
+    fig = quick_visualize_vec(y_test)
+    fig = quick_visualize_vec(rr_y_pred, title='RFF-RR prediction, nmae='+str(rr_gof),
+                              continue_on_fig=fig)
+
 
     ##### logistic regression (one instance per dof) #####
-    # logr_best_C_overall = optimize_logr_C([0.1,1,10], x_train, y_train, cv_splits)
-    logr_best_C_overall = Cs_vec[0]
-    logr_d = []
+    # logr_best_par = optimize_logr_C([0.1,1,10], x_train, y_train, cv_splits)
+    logr_best_par = Cs_vec[0]
+    logr_d = [] # collection of binary logistic regressors, one for each dof
     logr_y_pred_d = []
-    for d in range(y_train.shape[1]):  # for each dof
+    for d in range(y_train.shape[1]):
         logr_d.append(Pipeline([('scaler', StandardScaler()),
-                                ('LOGR', LogisticRegression(C = logr_best_C_overall,
+                                ('LOGR', LogisticRegression(C = logr_best_par,
                                                             class_weight=None,
                                                             random_state=1,
                                                             n_jobs=None))]))
-        logr_d[-1].fit(x_train, y_train[:, d]) # refit all the logr with the (same) best C
+        logr_d[-1].fit(x_train, y_train[:, d]) # fit all the logr with the (same) best C
         logr_y_pred_d.append(logr_d[-1].predict_proba(x_test))
     logr_y_pred = np.hstack(logr_y_pred_d)
-    logr_gof = goodness_of_fit(y_test, logr_y_pred_d, verbose=0)
+    logr_gof = goodness_of_fit(y_test, logr_y_pred, verbose=1)
 
 
 
