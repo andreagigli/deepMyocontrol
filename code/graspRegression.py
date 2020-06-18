@@ -20,32 +20,6 @@ from sklearn.metrics import r2_score, explained_variance_score, mean_absolute_er
 #################### ACCESSORY FUNCTIONS ####################
 #############################################################
 
-# TODO: delete this
-# def import_data_matrix(datapath):
-#     """
-#     Imports the fields of interest from the database.
-#     The fields are described in cognolato20gaze, table 4.
-#     Fields of interest and zero based original_idx:
-#     * (re)grasp (7)
-#     * (re)grasprepetition (8)
-#     * (re)object (9)
-#     * (re)position (12)
-#     * (re)dynamic (13)
-#     * emg (50-61)
-#     * ts (103)
-#     """
-#
-#     fields = ['regrasp', 'regrasprepetition', 'reobject', 'reposition', 'redynamic',
-#               'emg', 'ts']
-#
-#     d = loadmat(datapath, variable_names=fields)
-#     data = np.array(d.get(fields[0]))
-#     for key in fields[1:]:
-#         data = np.hstack((data, d.get(key)))
-#
-#     return data
-
-
 def convert_label(label):
     '''
     Converts the grasp label (column (re)grasp) into a regression-like target
@@ -227,44 +201,17 @@ def compute_cv_splits(data, idx_train, train_reps, debug_plot, subsample_val=Fal
             plt.plot(idxmask2binmask(cv_idx_train, -i));
             plt.plot(idxmask2binmask(cv_idx_test, -i));
 
+    # TODO: write CV visualization function (https://scikit-learn.org/stable/auto_examples/model_selection/plot_cv_indices.html#sphx-glr-auto-examples-model-selection-plot-cv-indices-py)
+
     return cv_splits
 
-
-def multiple_log_reg(x_train, y_train, x_test, y_test, cv_splits, logr_pipe,
-                     logr_param_grid_pipe):
-    '''
-    Train logistic regression separately on each dof
-    '''
-
-    logr_y_pred = np.zeros(y_test.shape)
-    logr_best_par = []
-    for d in range(y_train.shape[1]):
-        # custom scorer for logit-regression regressor:  flip (greater_is_better=False)
-        # default mserror (metrics.mean_squared_error) computed on the prediction
-        # probabilities (needs_proba=True) and not on the predictions of the model.
-        custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
-                                            needs_proba=True)
-        logr_grid_d = GridSearchCV(logr_pipe, cv=cv_splits,
-                                   param_grid=logr_param_grid_pipe,
-                                   n_jobs=-1,
-                                   scoring=custom_logr_mse_score
-                                   # TODO: check
-                                   )
-        logr_grid_d.fit(x_train, y_train[:, d])
-        logr_best_par.append(np.array([logr_grid_d.best_params_['LOGR__C']]))
-        logr_y_pred[:, d] = logr_grid_d.predict(x_test[:, d])
-    logr_best_par = np.median(logr_best_par, axis=1)  # C
-    logr_gof = goodness_of_fit(y_test, logr_y_pred, verbose=0)
-    return logr_y_pred, logr_gof, logr_best_par
 
 
 def optimize_logr_C(Cs_vec, x_train, y_train, cv_splits):
     '''
-    # TODO: make sure that the optimization is working, then delete the lines
-    # marked by a comment with exclamation mark
+    # TODO: make sure that the optimization is working
     '''
 
-    Cs_vec = [0.01,0.1,1,10]
     logr_pipe = Pipeline([('dimred', None), ('LOGR', LogisticRegression(class_weight=None,
                                                                         random_state=1,
                                                                         n_jobs=None))])
@@ -297,6 +244,35 @@ def optimize_logr_C(Cs_vec, x_train, y_train, cv_splits):
     logr_best_C_overall = Cs_vec[np.argmax(np.sum(logr_param_scores, axis = 1))]
 
     return logr_best_C_overall
+
+
+def multiple_log_reg(x_train, y_train, x_test, y_test, cv_splits, logr_pipe,
+                     logr_param_grid_pipe):
+    '''
+    Train logistic regression separately on each dof
+    '''
+
+    logr_y_pred = np.zeros(y_test.shape)
+    logr_best_par = []
+    for d in range(y_train.shape[1]):
+        # custom scorer for logit-regression regressor:  flip (greater_is_better=False)
+        # default mserror (metrics.mean_squared_error) computed on the prediction
+        # probabilities (needs_proba=True) and not on the predictions of the model.
+        custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
+                                            needs_proba=True)
+        logr_grid_d = GridSearchCV(logr_pipe, cv=cv_splits,
+                                   param_grid=logr_param_grid_pipe,
+                                   n_jobs=-1,
+                                   scoring=custom_logr_mse_score
+                                   # TODO: check
+                                   )
+        logr_grid_d.fit(x_train, y_train[:, d])
+        logr_best_par.append(np.array([logr_grid_d.best_params_['LOGR__C']]))
+        logr_y_pred[:, d] = logr_grid_d.predict(x_test[:, d])
+    logr_best_par = np.median(logr_best_par, axis=1)  # C
+    logr_gof = goodness_of_fit(y_test, logr_y_pred, verbose=0)
+    return logr_y_pred, logr_gof, logr_best_par
+
 
 
 def goodness_of_fit(Ytrue, Ypred, verbose=0):
@@ -338,6 +314,7 @@ def goodness_of_fit(Ytrue, Ypred, verbose=0):
         print("Range Normalized Mean Absolute Error: " + str(metrics["nmae"]))
         print("Variance Normalized Mean Squared Error: " + str(metrics["nrmse"]))
     return metrics
+
 
 
 def idxmask2binmask(m, coeff=1):
@@ -404,23 +381,7 @@ def quick_visualize_vec(data, overlay_data = None, title='', continue_on_fig = N
     return fig
 
 
-# TODO: delete this
-# def filter_data_columns(data):
-#     '''
-#     Filters out useless columns from the loaded database.
-#     The fiels are described in cognolato20gaze, table 4.
-#     Columns of interest and zero based original_idx:
-#     * (re)grasp (7)
-#     * (re)grasprepetition (8)
-#     * (re)object (9)
-#     * (re)position (12)
-#     * (re)dynamic (13)
-#     * emg (50-61)
-#     * ts (103)
-#     '''
-#
-#     data = data[:, (7, 8, 9, 12, 13, np.arange(50, 61), 103)]
-#     return data
+
 
 
 #############################################################
@@ -458,7 +419,7 @@ def main():
 
     fields = ['regrasp', 'regrasprepetition', 'reobject', 'reposition', 'redynamic',
               'emg', 'ts']
-    data = loadmat(args.datapath, variable_names=fields)
+    # data = loadmat(args.datapath, variable_names=fields) # TODO! uncomment this
 
     if not args.alltraintestsplits:
         train_reps = np.fromstring(args.trainreps, dtype=np.int, sep=' ')
@@ -469,7 +430,7 @@ def main():
 
     use_rff = args.linearregressor == 'nonlinear'
     n_rff = 300
-    n_seeds_rff = 1  # the seeds will be range(num_seeds_rff)
+    n_seeds_rff = 10  # the seeds will be range(num_seeds_rff)
 
     out_fname = ""
     if args.saveoutput:
@@ -496,14 +457,14 @@ def main():
     # sys.stdout = open(out_fname + '.txt', 'w')  # redirect console to file
 
     ##### process database #####
-    data['regrasp'] = convert_label(data['regrasp'])
-    data = extract_features(data)
-
-    # split database
-    x_train, y_train, x_test, y_test, cv_splits = split_data(data, train_reps,
-                                                             test_reps,
-                                                             debug_plot = False,
-                                                             subsample_train=True)
+    # data['regrasp'] = convert_label(data['regrasp'])
+    # data = extract_features(data)
+    #
+    # # split database
+    # x_train, y_train, x_test, y_test, cv_splits = split_data(data, train_reps,
+    #                                                          test_reps,
+    #                                                          debug_plot = False,
+    #                                                          subsample_train=True)
 
     # TODO: remove the following (mock db just for testing purposes)
     from sklearn.datasets import load_boston
@@ -514,8 +475,7 @@ def main():
     x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.33,
                                                         shuffle=False)
     kf = KFold(n_splits=3)
-    cv_splits = kf.split(x_train,y_train)
-
+    cv_splits = list(kf.split(x_train,y_train))
 
     ##### RFF-RR averaged over multiple seeds #####
     rr_best_par_seed = []
@@ -530,7 +490,7 @@ def main():
                                'RR__alpha': alphas_vec}]
         rr_grid = GridSearchCV(rr_pipe, cv=cv_splits,
                                param_grid=rr_param_grid_pipe,
-                               scoring="neg_mean_squared_error", iid=False, verbose=1)
+                               scoring="neg_mean_squared_error", verbose=1)
         rr_grid.fit(x_train, y_train)
         rr_best_par_seed.append(np.array([rr_grid.best_params_['RR__alpha'],
                                           rr_grid.best_params_['RFF__gamma']]))
@@ -538,10 +498,19 @@ def main():
         rr_gof_seed.append(goodness_of_fit(y_test, rr_y_pred_seed[-1], verbose=0))
     # cumulative results rff for multiple seeds
     rr_gof = rr_gof_seed[0]
+    rr_gof_std_seeds = {}
     for key in rr_gof.keys():
         rr_gof[key] = np.mean([item[key] for item in rr_gof_seed])
+        rr_gof_std_seeds[key] = np.std([item[key] for item in rr_gof_seed])
+    rr_best_par = np.median(rr_best_par_seed, axis=0)
     rr_y_pred = np.mean(rr_y_pred_seed, axis=0)
-    quick_visualize_vec(y_test, rr_y_pred, title='RFF-RR prediction, nmae='+str(rr_gof))
+    quick_visualize_vec(y_test, rr_y_pred, title='RFF-RR prediction\n nmae='+
+                                                 '{:.2f}'.format(rr_gof["nmae"]) +' +- ' +
+                                                '{:.2f}'.format(rr_gof_std_seeds["nmae"])+
+                                                   ' (over '+ str(n_seeds_rff) +' seeds)'+
+                                          '\n (median) best alpha: '+ str(rr_best_par[0])+
+                                         '  (median) best gamma: ' + str(rr_best_par[1]) +
+                                                       '\n\nall gof stats: '+ str(rr_gof))
 
 
     ##### logistic regression (one instance per dof) #####
