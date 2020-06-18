@@ -144,8 +144,6 @@ def split_data(data, train_reps, test_reps, debug_plot=False, subsample_train=Fa
                                                              test_reps_dyn))))[0]
 
     if subsample_train == True:
-        # TODO: implement subsampling and compute cv_splits accordingly (training data
-        #  1:10, validation data further 1:4 over the training data)
         idx_train = idx_train[::10]
 
     x_train = data["emg"][idx_train, :]
@@ -216,6 +214,10 @@ def compute_cv_splits(data, idx_train, train_reps, debug_plot, subsample_val=Fal
                                                            cv_test_rep_dyn))).ravel()
 
         cv_splits.append((np.where(cv_idx_train)[0], np.where(cv_idx_test)[0]))
+
+    if subsample_val:
+        for i in range(len(cv_splits)):
+            cv_splits[i] = (cv_splits[i][0][::4], cv_splits[i][1][::4])
 
     if debug_plot:
         plt.figure();
@@ -303,28 +305,31 @@ def goodness_of_fit(Ytrue, Ypred, verbose=0):
     '''
 
     metrics = {}
-    metrics["r2"] = r2_score(Ytrue, Ypred,
-                  multioutput="raw_values")  # multioutput alternatives: "uniform_variance" or "variance_weighted"
+    metrics["r2"] = r2_score(Ytrue, Ypred, multioutput="raw_values")  # "raw_values, "multioutput"
     metrics["r2"] = np.mean(metrics["r2"][metrics["r2"] != 1])
     metrics["expl_var"] = explained_variance_score(Ytrue, Ypred,
                                                multioutput="uniform_average")
     # average magnitude of the error (same unit as y)
     metrics["mae"] = mean_absolute_error(Ytrue, Ypred, multioutput="uniform_average")
     # average squared magnitude of the error (same unit as y), penalizes larger errors
-    metrics["rmse"] = np.mean(mean_squared_error(Ytrue, Ypred, multioutput="raw_values",
-                                       squared=False))
+    metrics["rmse"] = np.mean(np.sqrt(mean_squared_error(Ytrue, Ypred,
+                                                   multioutput="raw_values")))
     with np.errstate(divide='ignore', invalid='ignore'):
-        # nmae = mae normalized over range(Ytrue) (for each channel) and averaged over all the outputs.
-        # Analogous to mae, normalized over the range of ytrue to compare it with the nmae of other datasets with possibly different ranges.
+        # nmae = mae normalized over range(Ytrue) (for each channel) and averaged over all
+        # the outputs.
+        # Analogous to mae, normalized over the range of ytrue to compare it with the nmae
+        # of other datasets with possibly different ranges.
         # Can be seen as the "avg magnitude of the error is 13% of the amplitude of ytrue".
         metrics["nmae"] = np.mean(np.nan_to_num(
             np.divide(mean_absolute_error(Ytrue, Ypred, multioutput="raw_values"),
                       np.ptp(Ytrue, axis=0))))
-        # nmrse = rmse normalized over var(Ytrue) (for each channel) and averaged over all the outputs.
-        # Analogous to the rmse, normalized over the variance of ytrue to compare it with the nrmse of other datasets with possibly different variance.
+        # nmrse = rmse normalized over var(Ytrue) (for each channel) and averaged over all
+        # the outputs.
+        # Analogous to the rmse, normalized over the variance of ytrue to compare it with
+        # the nrmse of other datasets with possibly different variance.
         metrics["nrmse"] = np.mean(np.nan_to_num(
-            np.divide(mean_squared_error(Ytrue, Ypred, multioutput="raw_values",
-                                         squared=False), np.var(Ytrue, axis=0))))
+            np.divide(np.sqrt(mean_squared_error(Ytrue, Ypred, multioutput="raw_values")),
+                      np.var(Ytrue, axis=0))))
     if verbose == 1:
         print("Coefficient of determination R2: " + str(metrics["r2"]))
         print("Explained Variance: " + str(metrics["expl_var"]))
@@ -351,9 +356,11 @@ def idxmask2binmask(m, coeff=1):
     return v
 
 
-def quick_visualize_vec(data, title='', continue_on_fig = None):
+def quick_visualize_vec(data, overlay_data = None, title='', continue_on_fig = None):
     '''
     Multiple line subplots, one for each column (up to the 12th column).
+    If two matrices (data and overlay_data) are passed, the second will be overlayed
+    to the first one.
     If a figure handle is passed, the function will try to plot the data
     on that function (num_subplots must be equal to num columns!).
     '''
@@ -369,6 +376,17 @@ def quick_visualize_vec(data, title='', continue_on_fig = None):
     if continue_on_fig and len(continue_on_fig.axes) != data.shape[1]:
         print("The number of data columns and of subplots passed must be the same!")
         return None
+
+    if overlay_data is not None:
+        if len(overlay_data.shape) > 2:
+            print("Overlay_data not plotted. Only 1 and 2d arrays are accepted.")
+        elif len(overlay_data.shape) == 1:
+            overlay_data = overlay_data[:, None]
+        if overlay_data.shape != data.shape:
+            print("Overlay_data not plotted. It must have the same number of columns of "
+                  "the main data.")
+            return None
+
     n_subplot_cols = (data.shape[1]-1) //6 +1
     n_subplot_rows = np.min([6,data.shape[1]])
     if not continue_on_fig:
@@ -376,12 +394,13 @@ def quick_visualize_vec(data, title='', continue_on_fig = None):
         for i in range(1, data.shape[1]+1):
             ax1 = fig.add_subplot(n_subplot_rows, n_subplot_cols, i)
             ax1.plot(data[:,i-1])
-            plt.title(title)
+            if overlay_data is not None: ax1.plot(overlay_data[:,i-1])
     else:
         fig = continue_on_fig
         for i in range(data.shape[1]):
             fig.axes[i].plot(data[:,i])
-            plt.title(title)
+            if overlay_data is not None: fig.axes[i].plot(overlay_data[:, i - 1])
+    plt.suptitle(title)
     return fig
 
 
@@ -418,12 +437,12 @@ def main():
                         help='training repetitions (from 1 to 4). Ex: 1 2 3')
     parser.add_argument('--testreps', required=False, default='4',
                         help='test repetitions (from 1 to 4). Ex: 4')
-    parser.add_argument('--alltraintestsplits', required=False, default=False,
-                        help='if true, overrides trainreps and testreps. Performance '
+    parser.add_argument('--alltraintestsplits', required=False, default=False, type=bool,
+                        help='if True, overrides trainreps and testreps. Performance '
                              'will be computed over the average of all the possible '
                              'train-test splits 123-4,124-3,134-2,124-3. Default: False.')
 
-    parser.add_argument('--hypopt', required=False, default=False,
+    parser.add_argument('--hypopt', required=False, default=False, type=bool,
                         help='hyperparameter optimization. Default: False.')
 
     parser.add_argument('--linearregressor', required=False, default="nonlinear",
@@ -486,32 +505,43 @@ def main():
                                                              debug_plot = False,
                                                              subsample_train=True)
 
+    # TODO: remove the following (mock db just for testing purposes)
+    from sklearn.datasets import load_boston
+    from sklearn.model_selection import train_test_split
+    from sklearn.model_selection import KFold
+    X, y = load_boston(return_X_y=True)
+    y = y[:,None]; y = np.hstack((y,y+np.random.normal(0,10,y.shape)))
+    x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.33,
+                                                        shuffle=False)
+    kf = KFold(n_splits=3)
+    cv_splits = kf.split(x_train,y_train)
+
+
     ##### RFF-RR averaged over multiple seeds #####
     rr_best_par_seed = []
     rr_y_pred_seed = []
     rr_gof_seed = []
     for seed in range(n_seeds_rff):  # average results over multiple rff seeds
-        rr_pipe = Pipeline([
-            ('RFF', RBFSampler(n_components=n_rff, random_state=seed)),
-            ('RR', Ridge())
-        ])
-        rr_param_grid_pipe = [{'RFF__gamma': gammas_vec, 'RR__alpha': alphas_vec}]
+        rr_pipe = Pipeline([('RFF', RBFSampler(n_components=n_rff, random_state=seed)),
+                            ('scaler', StandardScaler()),
+                            ('RR', Ridge())
+                            ])
+        rr_param_grid_pipe = [{'RFF__gamma': gammas_vec,
+                               'RR__alpha': alphas_vec}]
         rr_grid = GridSearchCV(rr_pipe, cv=cv_splits,
                                param_grid=rr_param_grid_pipe,
-                               scoring="neg_mean_squared_error", iid=False)
+                               scoring="neg_mean_squared_error", iid=False, verbose=1)
         rr_grid.fit(x_train, y_train)
         rr_best_par_seed.append(np.array([rr_grid.best_params_['RR__alpha'],
-                                               rr_grid.best_params_['RFF__gamma']]))
+                                          rr_grid.best_params_['RFF__gamma']]))
         rr_y_pred_seed.append(rr_grid.predict(x_test))
-        rr_gof_seed.append(goodness_of_fit(y_test, rr_y_pred_seed[-1],
-                                                verbose=0)) # TODO: not working anymore (now it returns a dictionary..)
+        rr_gof_seed.append(goodness_of_fit(y_test, rr_y_pred_seed[-1], verbose=0))
     # cumulative results rff for multiple seeds
-    rr_best_par = np.median(rr_best_par_seed, axis=0)  # alpha, gamma
+    rr_gof = rr_gof_seed[0]
+    for key in rr_gof.keys():
+        rr_gof[key] = np.mean([item[key] for item in rr_gof_seed])
     rr_y_pred = np.mean(rr_y_pred_seed, axis=0)
-    rr_gof = np.mean(rr_gof_seed, axis=0)
-    fig = quick_visualize_vec(y_test)
-    fig = quick_visualize_vec(rr_y_pred, title='RFF-RR prediction, nmae='+str(rr_gof),
-                              continue_on_fig=fig)
+    quick_visualize_vec(y_test, rr_y_pred, title='RFF-RR prediction, nmae='+str(rr_gof))
 
 
     ##### logistic regression (one instance per dof) #####
