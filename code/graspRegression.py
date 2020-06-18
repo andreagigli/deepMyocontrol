@@ -129,8 +129,8 @@ def split_data(data, train_reps, test_reps, debug_plot=False, subsample_train=Fa
         plt.figure()
         plt.title('All grasp reps, train reps, test reps')
         plt.plot(data["regrasprepetition"]);
-        plt.plot(idxmask2binmask(idx_train,1));
-        plt.plot(idxmask2binmask(idx_test,1));
+        plt.plot(idxmask2binmask(idx_train, 1));
+        plt.plot(idxmask2binmask(idx_test, 1));
 
     # compute data splits for cross validation
     cv_splits = compute_cv_splits(data, idx_train, train_reps, debug_plot,
@@ -206,7 +206,6 @@ def compute_cv_splits(data, idx_train, train_reps, debug_plot, subsample_val=Fal
     return cv_splits
 
 
-
 def optimize_logr_C(Cs_vec, x_train, y_train, cv_splits):
     '''
     # TODO: make sure that the optimization is working
@@ -215,39 +214,39 @@ def optimize_logr_C(Cs_vec, x_train, y_train, cv_splits):
     logr_pipe = Pipeline([('dimred', None), ('LOGR', LogisticRegression(class_weight=None,
                                                                         random_state=1,
                                                                         n_jobs=None))])
-    logr_param_grid_pipe = {'LOGR__C': Cs_vec}
+    logr_par_grid_pipe = {'LOGR__C': Cs_vec}
     # custom scorer for logit-regression regressor:  flip (greater_is_better=False)
     # default mserror (metrics.mean_squared_error) computed on the prediction
     # probabilities (needs_proba=True) and not on the predictions of the model.
     # 2 equivalent implementations of the scorer are reported.
     custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
                                         needs_proba=True)
+
     def custom_logr_mse_score(clf, X, y_true):
         y_pred_proba = clf.predict_proba(X)
-        error = mean_squared_error(y_true,y_pred_proba[:, 1])
+        error = mean_squared_error(y_true, y_pred_proba[:, 1])
         score = -error
         return score
 
     logr_grid_d = []
     for d in range(y_train.shape[1]):  # for each dof
         logr_grid_d.append(GridSearchCV(logr_pipe, cv=cv_splits,
-                                        param_grid=logr_param_grid_pipe,
+                                        param_grid=logr_par_grid_pipe,
                                         n_jobs=None, scoring=custom_logr_mse_score,
-                                        refit = False, verbose = True))
+                                        refit=False, verbose=True))
         logr_grid_d[-1].fit(x_train, y_train[:, d])
     # determine best C overall
-    logr_grid_d[0].cv_results_['mean_test_score']
-    logr_param_scores = np.zeros((len(logr_grid_d), len(logr_grid_d[0].cv_results_[
-                                                            'mean_test_score'])))
+    logr_par_scores = np.zeros((len(logr_grid_d),
+                                  len(logr_grid_d[0].cv_results_['mean_test_score'])))
     for i in range(len(logr_grid_d)):
-        logr_param_scores[i,:] = logr_grid_d[i].cv_results_['mean_test_score']
-    logr_best_C_overall = Cs_vec[np.argmax(np.sum(logr_param_scores, axis = 1))]
-
+        logr_par_scores[i, :] = logr_grid_d[i].cv_results_['mean_test_score']
+    logr_C_scores_overall = np.mean(logr_par_scores, axis=0)
+    logr_best_C_overall = Cs_vec[np.argmax(logr_C_scores_overall)]
     return logr_best_C_overall
 
 
 def multiple_log_reg(x_train, y_train, x_test, y_test, cv_splits, logr_pipe,
-                     logr_param_grid_pipe):
+                     logr_par_grid_pipe):
     '''
     Train logistic regression separately on each dof
     '''
@@ -261,7 +260,7 @@ def multiple_log_reg(x_train, y_train, x_test, y_test, cv_splits, logr_pipe,
         custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
                                             needs_proba=True)
         logr_grid_d = GridSearchCV(logr_pipe, cv=cv_splits,
-                                   param_grid=logr_param_grid_pipe,
+                                   param_grid=logr_par_grid_pipe,
                                    n_jobs=-1,
                                    scoring=custom_logr_mse_score
                                    # TODO: check
@@ -274,22 +273,22 @@ def multiple_log_reg(x_train, y_train, x_test, y_test, cv_splits, logr_pipe,
     return logr_y_pred, logr_gof, logr_best_par
 
 
-
 def goodness_of_fit(Ytrue, Ypred, verbose=0):
     '''
     Compute r2, expl_var, mae, rmse, nmae, nrmse for multiple regression.
     '''
 
     metrics = {}
-    metrics["r2"] = r2_score(Ytrue, Ypred, multioutput="raw_values")  # "raw_values, "multioutput"
+    metrics["r2"] = r2_score(Ytrue, Ypred,
+                             multioutput="raw_values")  # "raw_values, "multioutput"
     metrics["r2"] = np.mean(metrics["r2"][metrics["r2"] != 1])
     metrics["expl_var"] = explained_variance_score(Ytrue, Ypred,
-                                               multioutput="uniform_average")
+                                                   multioutput="uniform_average")
     # average magnitude of the error (same unit as y)
     metrics["mae"] = mean_absolute_error(Ytrue, Ypred, multioutput="uniform_average")
     # average squared magnitude of the error (same unit as y), penalizes larger errors
     metrics["rmse"] = np.mean(np.sqrt(mean_squared_error(Ytrue, Ypred,
-                                                   multioutput="raw_values")))
+                                                         multioutput="raw_values")))
     with np.errstate(divide='ignore', invalid='ignore'):
         # nmae = mae normalized over range(Ytrue) (for each channel) and averaged over all
         # the outputs.
@@ -316,7 +315,6 @@ def goodness_of_fit(Ytrue, Ypred, verbose=0):
     return metrics
 
 
-
 def idxmask2binmask(m, coeff=1):
     '''
     Converts an indices mask to a binary mask. The binary mask is == 1 in all
@@ -333,7 +331,7 @@ def idxmask2binmask(m, coeff=1):
     return v
 
 
-def quick_visualize_vec(data, overlay_data = None, title='', continue_on_fig = None):
+def quick_visualize_vec(data, overlay_data=None, title='', continue_on_fig=None):
     '''
     Multiple line subplots, one for each column (up to the 12th column).
     If two matrices (data and overlay_data) are passed, the second will be overlayed
@@ -364,24 +362,21 @@ def quick_visualize_vec(data, overlay_data = None, title='', continue_on_fig = N
                   "the main data.")
             return None
 
-    n_subplot_cols = (data.shape[1]-1) //6 +1
-    n_subplot_rows = np.min([6,data.shape[1]])
+    n_subplot_cols = (data.shape[1] - 1) // 6 + 1
+    n_subplot_rows = np.min([6, data.shape[1]])
     if not continue_on_fig:
         fig = plt.figure()
-        for i in range(1, data.shape[1]+1):
+        for i in range(1, data.shape[1] + 1):
             ax1 = fig.add_subplot(n_subplot_rows, n_subplot_cols, i)
-            ax1.plot(data[:,i-1])
-            if overlay_data is not None: ax1.plot(overlay_data[:,i-1])
+            ax1.plot(data[:, i - 1])
+            if overlay_data is not None: ax1.plot(overlay_data[:, i - 1])
     else:
         fig = continue_on_fig
         for i in range(data.shape[1]):
-            fig.axes[i].plot(data[:,i])
+            fig.axes[i].plot(data[:, i])
             if overlay_data is not None: fig.axes[i].plot(overlay_data[:, i - 1])
     plt.suptitle(title)
     return fig
-
-
-
 
 
 #############################################################
@@ -467,72 +462,120 @@ def main():
     #                                                          subsample_train=True)
 
     # TODO: remove the following (mock db just for testing purposes)
-    from sklearn.datasets import load_boston
+    from sklearn.datasets import load_boston, make_regression, make_classification
     from sklearn.model_selection import train_test_split
     from sklearn.model_selection import KFold
-    X, y = load_boston(return_X_y=True)
-    y = y[:,None]; y = np.hstack((y,y+np.random.normal(0,10,y.shape)))
+    # X, y = load_boston(return_X_y=True)
+    X, y = make_classification(n_samples=1000, n_features=12, random_state=1, n_classes=2)
+    y = y[:, None];
+    y = np.hstack((y, 1 - y))
     x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.33,
                                                         shuffle=False)
     kf = KFold(n_splits=3)
-    cv_splits = list(kf.split(x_train,y_train))
+    cv_splits = list(kf.split(x_train, y_train))
 
-    ##### RFF-RR averaged over multiple seeds #####
+
+    #################### RFF-RR averaged over multiple seeds ####################
+
+    # hyperparameter optimization
     rr_best_par_seed = []
     rr_y_pred_seed = []
     rr_gof_seed = []
     for seed in range(n_seeds_rff):  # average results over multiple rff seeds
         rr_pipe = Pipeline([('RFF', RBFSampler(n_components=n_rff, random_state=seed)),
-                            ('scaler', StandardScaler()),
-                            ('RR', Ridge())
-                            ])
-        rr_param_grid_pipe = [{'RFF__gamma': gammas_vec,
-                               'RR__alpha': alphas_vec}]
-        rr_grid = GridSearchCV(rr_pipe, cv=cv_splits,
-                               param_grid=rr_param_grid_pipe,
+                            # ('scaler', StandardScaler()),
+                            ('RR', Ridge())])
+        rr_par_grid_pipe = [{'RFF__gamma': gammas_vec, 'RR__alpha': alphas_vec}]
+        rr_grid = GridSearchCV(rr_pipe, cv=cv_splits, param_grid=rr_par_grid_pipe,
                                scoring="neg_mean_squared_error", verbose=1)
-        rr_grid.fit(x_train, y_train)
+        rr_grid.fit(x_train, y_train) # refit model
         rr_best_par_seed.append(np.array([rr_grid.best_params_['RR__alpha'],
                                           rr_grid.best_params_['RFF__gamma']]))
         rr_y_pred_seed.append(rr_grid.predict(x_test))
         rr_gof_seed.append(goodness_of_fit(y_test, rr_y_pred_seed[-1], verbose=0))
-    # cumulative results rff for multiple seeds
+
+    # multi-dof (cumulative) results of rff-rr averaged over multiple seeds
+    rr_y_pred = np.mean(rr_y_pred_seed, axis=0)
     rr_gof = rr_gof_seed[0]
     rr_gof_std_seeds = {}
     for key in rr_gof.keys():
         rr_gof[key] = np.mean([item[key] for item in rr_gof_seed])
         rr_gof_std_seeds[key] = np.std([item[key] for item in rr_gof_seed])
-    rr_best_par = np.median(rr_best_par_seed, axis=0)
-    rr_y_pred = np.mean(rr_y_pred_seed, axis=0)
-    quick_visualize_vec(y_test, rr_y_pred, title='RFF-RR prediction\n nmae='+
-                                                 '{:.2f}'.format(rr_gof["nmae"]) +' +- ' +
-                                                '{:.2f}'.format(rr_gof_std_seeds["nmae"])+
-                                                   ' (over '+ str(n_seeds_rff) +' seeds)'+
-                                          '\n (median) best alpha: '+ str(rr_best_par[0])+
-                                         '  (median) best gamma: ' + str(rr_best_par[1]) +
-                                                       '\n\nall gof stats: '+ str(rr_gof))
+
+    rr_best_par = np.median(rr_best_par_seed, axis=0) # TODO: correct this! it's wrong!
+    # you want the median best PAIR (alpha gamma)
+    # TODO: compute mean value of the median(best(couple of params))
+
+    title = 'RFF-RR prediction\n nmae=' + '{:.2f}'.format(rr_gof["nmae"]) + ' +- ' +  \
+            '{:.2f}'.format(rr_gof_std_seeds["nmae"]) + ' (over ' + str(n_seeds_rff) + \
+            ' seeds)' + '\n (median) best alpha: ' + str(rr_best_par[0]) + \
+            '  (median)  best gamma: ' + str(rr_best_par[1]) + \
+            '\n\nall gof stats: ' + str(rr_gof)
+    quick_visualize_vec(y_test, rr_y_pred,title=title)
 
 
-    ##### logistic regression (one instance per dof) #####
-    # logr_best_par = optimize_logr_C([0.1,1,10], x_train, y_train, cv_splits)
-    logr_best_par = Cs_vec[0]
-    logr_d = [] # collection of binary logistic regressors, one for each dof
+    #################### logistic regression (one instance per dof) ####################
+
+    # logr_best_par = optimize_logr_C(Cs_vec, x_train, y_train, cv_splits)
+
+    # hyperparameter optimization
+    logr_pipe = Pipeline([('dimred', None), ('LOGR', LogisticRegression(class_weight=None,
+                                                                        random_state=1,
+                                                                        n_jobs=None))])
+    logr_par_grid_pipe = {'LOGR__C': Cs_vec}
+    # custom scorer for logit-regression regressor:  flip (greater_is_better=False)
+    # default mserror (metrics.mean_squared_error) computed on the prediction
+    # probabilities (needs_proba=True) and not on the predictions of the model.
+    # 2 equivalent implementations of the scorer are reported.
+    custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
+                                        needs_proba=True)
+
+    def custom_logr_mse_score(clf, X, y_true):
+        y_pred_proba = clf.predict_proba(X)
+        error = mean_squared_error(y_true, y_pred_proba[:, 1])
+        score = -error
+        return score
+
+    logr_grid_d = []
+    for d in range(y_train.shape[1]):  # for each dof
+        logr_grid_d.append(GridSearchCV(logr_pipe, cv=cv_splits,
+                                        param_grid=logr_par_grid_pipe,
+                                        n_jobs=None, scoring=custom_logr_mse_score,
+                                        refit=False, verbose=True))
+        logr_grid_d[-1].fit(x_train, y_train[:, d])
+    # determine median(best_C) overall
+    logr_best_par = np.median([list(item.best_params_.values()) for item in logr_grid_d])
+    # and its mean score
+    logr_best_par_score = np.mean(list([item.cv_results_["mean_test_score"] for item in
+                                     logr_grid_d]),axis=0)[np.where(Cs_vec==logr_best_par)[0][0]]
+
+    # refit all the logr with the (same) best C
+    logr_d = []  # list of logit reg models (one per dof)
     logr_y_pred_d = []
+    logr_y_pred_proba_d = []
     for d in range(y_train.shape[1]):
         logr_d.append(Pipeline([('scaler', StandardScaler()),
-                                ('LOGR', LogisticRegression(C = logr_best_par,
+                                ('LOGR', LogisticRegression(C=logr_best_par,
                                                             class_weight=None,
                                                             random_state=1,
                                                             n_jobs=None))]))
-        logr_d[-1].fit(x_train, y_train[:, d]) # fit all the logr with the (same) best C
-        logr_y_pred_d.append(logr_d[-1].predict_proba(x_test))
-    logr_y_pred = np.hstack(logr_y_pred_d)
+        logr_d[-1].fit(x_train, y_train[:, d])
+        logr_y_pred_d.append(logr_d[-1].predict(x_test))
+        logr_y_pred_proba_d.append(logr_d[-1].predict_proba(x_test)[:, 1])
+
+    # multi-dof (cumulative) results of logr for multiple seeds
+    logr_y_pred = np.array(logr_y_pred_d).transpose()
+    if len(logr_y_pred_d) == 1: logr_y_pred = logr_y_pred_d[:, None]
+    logr_y_pred_proba = np.array(logr_y_pred_proba_d).transpose()
+    if len(logr_y_pred_proba_d) == 1: logr_y_pred_proba = logr_y_pred_proba_d[:, None]
     logr_gof = goodness_of_fit(y_test, logr_y_pred, verbose=1)
 
-
-
-
-
+    title = 'LOGIT R prediction\n nmae=' + '{:.2f}'.format(logr_gof["nmae"]) + \
+            '\n (median) best alpha: ' + str(rr_best_par[0]) + \
+            '  (median)  best gamma: ' + str(rr_best_par[1]) + \
+            '\n\nall gof stats: ' + str(rr_gof)
+    fig = quick_visualize_vec(y_test, logr_y_pred)
+    quick_visualize_vec(logr_y_pred_proba, continue_on_fig=fig)
 
     # TESTING OUT LOGISTIC REGRESSION ON 1 DOF (SCALING/BALANCING/RFF)
     # y_train_0 = y_train[:,0]
@@ -575,7 +618,6 @@ def main():
     #
     # # RFF IS GONE ALREADY, BUT IT DID NOT WORK. RFF + SCALING DID NOT WORK EITHER.
 
-
     # TESTING OUT CUSTOM SCORERS. TODO: DELETE
     # custom_logr_mse_score = make_scorer(mean_squared_error, greater_is_better=False,
     #                                     needs_proba=True)
@@ -601,9 +643,6 @@ def main():
     # my_acc_scorer(pipe, x_test, y_test_0)
     # pipe.score(x_train, y_train_0)
     # pipe.score(x_test, y_test_0)
-
-
-
 
     print('The end')
 
