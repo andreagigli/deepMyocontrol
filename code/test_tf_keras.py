@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+import numpy as np
 
 ########################## tf.keras ##########################
 # tf.keras (different from the standalone keras that will be discontinued)
@@ -429,20 +430,75 @@ x_train = x_train[:-10000]
 y_train = y_train[:-10000]
 # model.fit(x_train, y_train, batch_size=64, epochs=2, validation_data=(x_val, y_val))
 #
-# 2) create tf.data.Database object by slicing existing tensors
+# 2) create tf.data.Database object by slicing existing tensors along the first dimension
 x = x_train  # pretend all db is in x_train
 y = y_train
 dataset = tf.data.Dataset.from_tensor_slices((x, y))
 train_dataset = dataset.skip(1000)  # from 1000 to end
 test_dataset = dataset.take(1000)  # from 0 to 999
-train_dataset = train_dataset.shuffle(buffer_size=1024).batch(
-    64)  # the batching must be done by the dataset object and not by the fit() method.
+train_dataset = train_dataset.shuffle(buffer_size=1024).batch(64)  # the batching must be done by the dataset object and not by the fit() method.
 # model.fit(train_dataset, epochs=3)
 # model.fit(train_dataset, epochs=3, steps_per_epoch=100) # in case you want to just use 100 batches in each epoch (the next epoch uses the remaining batches)
 #
-# 3) create tf.data.Database object from files. For example by using
-# tf.data.TFRecordDataset() or using generators (e.g. image.ImageDataGenerator + Dataset.from_generator)
-# more about this here https://www.tensorflow.org/guide/data#consuming_python_generators
+# print the dataset elements and element components. A dataset contains "elements", each
+# of which has the same structure. Each element consists of one or multiple "element components".
+dataset = tf.data.Dataset.from_tensor_slices([[1,2,3], [4,5,6], [7,8,9], [10,11,12], [13,14,15], [16,17,18]])
+print(dataset.element_spec) # prints the type of the element components
+list(dataset.as_numpy_iterator()) # (1) convert to list. WARNING! it loads the whole dataset in memory!
+list(dataset.as_numpy_iterator())[0] # (2) convert to list and get a specific element
+for element in dataset.take(2):  # (3) iterate over it (it does not load the whole dataset in memory)
+    print(element)
+# for element, label in dataset.take(1): # (if the dataset has got labels)
+#     print(label)
+# a "batched" database iterates over the batches
+dataset = tf.data.Dataset.from_tensor_slices([[1,2,3], [4,5,6], [7,8,9], [10,11,12], [13,14,15], [16,17,18]])
+dataset = dataset.batch(2)
+list(dataset.as_numpy_iterator())[0] # first element = first batch
+list(dataset.as_numpy_iterator())[0][1] # second component of the first element
+print(dataset.element_spec)
+#
+# note the difference between slicing lists, tuples and numpy arrays
+dataset = tf.data.Dataset.from_tensor_slices([[1,2,3], [4,5,6]])
+list(dataset.as_numpy_iterator())
+dataset = tf.data.Dataset.from_tensor_slices(([1,2,3], [4,5,6]))
+list(dataset.as_numpy_iterator())
+dataset = tf.data.Dataset.from_tensor_slices(np.array([[1,2,3], [4,5,6]]))
+list(dataset.as_numpy_iterator())
+#
+# 3) create tf.data.Database object from files (text, csv, sets of files)
+# https://www.tensorflow.org/guide/data#reading_input_data.
+# For example create image db from nested folders, each folder representing one class.
+# The name of the folder is the class label.
+flowers_root = tf.keras.utils.get_file(
+    'flower_photos',
+    'https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz',
+    untar=True)
+import pathlib
+import os
+flowers_root = pathlib.Path(flowers_root)
+dataset = tf.data.Dataset.list_files(str(flowers_root/'*/*'))
+def parse_image(filename):
+  parts = tf.strings.split(filename, os.sep)
+  label = parts[-2]
+  image = tf.io.read_file(filename)
+  image = tf.image.decode_jpeg(image)
+  image = tf.image.convert_image_dtype(image, tf.float32)
+  image = tf.image.resize(image, [128, 128])
+  return image, label
+labeled_dataset = dataset.map(parse_image)
+for element, label in labeled_dataset.take(1): # (if the dataset has got labels)
+    print(label)
+#
+#
+# HOW TO APPLY AN OPERATION TO ALL THE ELEMENTS OF THE DATASET
+# use dataset.map(function)
+dataset = tf.data.Dataset.from_tensor_slices([[1,2,3], [4,5,6], [7,8,9], [10,11,12], [13,14,15], [16,17,18]])
+list(dataset.as_numpy_iterator())
+def tensor_sum(x):
+    return tf.math.reduce_sum(x)
+dataset = dataset.map(tensor_sum)
+list(dataset.as_numpy_iterator())
+#
 #
 # VALIDATION SET
 # When the training set is provided explicitely, the validation data can be
@@ -489,6 +545,27 @@ for batch in dataset.take(2):
 
 placeholder = 1
 
+
+
+
+
+
+
+import graspRegression as gr
+
+fields = ["regrasp", "regrasprepetition", "reobject", "reposition", "redynamic",
+          "emg", "ts"]
+x_train, y_train, x_test, y_test, cv_splits = \
+    gr.load_megane_database("D:\\Documenti\\PROJECTS\\20_logReg\\data\\S010_ex1.mat",
+                             fields, train_reps=np.array([1,2,3]), test_reps=np.array([4]),
+                             subsamplerate=1, feature_set=["raw"])
+dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+
+# how the heck do I create images from windows in the dataset?
+# maybe this can be helpful
+# https://www.tensorflow.org/tutorials/structured_data/time_series#convolution_neural_network
+
+
 myo_cnn_in = keras.Input(shape=(40, 40, 1), name="in")
 x = layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn1")(myo_cnn_in)
 x = layers.BatchNormalization(name="bn1")(x)
@@ -526,10 +603,12 @@ history = myo_cnn.fit(
     x_train,
     y_train,
     batch_size=128,
-    epochs=2,
+    epochs=30,
     validation_data=(x_val, y_val),
 )
 
 
-# check out dataset windowing example https://www.tensorflow.org/tutorials/structured_data/time_series#data_windowing
-# and, in case, https://www.tensorflow.org/guide/data#time_series_windowing
+
+
+
+
