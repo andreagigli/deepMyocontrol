@@ -3,6 +3,11 @@ from tensorflow import keras
 from tensorflow.keras import layers
 import numpy as np
 
+import matplotlib.pyplot as plt
+import os
+import pandas as pd
+import datetime
+
 ########################## tf.keras ##########################
 # tf.keras (different from the standalone keras that will be discontinued)
 # wraps most deep-learning functionalities of tensorflow in a high-level API.
@@ -448,6 +453,8 @@ list(dataset.as_numpy_iterator()) # (1) convert to list. WARNING! it loads the w
 list(dataset.as_numpy_iterator())[0] # (2) convert to list and get a specific element
 for element in dataset.take(2):  # (3) iterate over it (it does not load the whole dataset in memory)
     print(element)
+iterator = dataset.as_numpy_iterator() # (4) convert to iterator
+iterator.next()
 # for element, label in dataset.take(1): # (if the dataset has got labels)
 #     print(label)
 # a "batched" database iterates over the batches
@@ -510,6 +517,28 @@ model.fit(x_train, y_train, batch_size=64, epochs=2, validation_data=(x_val, y_v
 # or passed explicitely as a Dataset object
 val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val)).batch(64)
 model.fit(train_dataset, epochs=1, validation_data=val_dataset)
+
+x = np.array([0,10,100])[None,:]
+for i in range(20):
+    x = np.vstack((x, x[-1,:]+1))
+y = x[:,0][:,None]
+x.shape
+y.shape
+dataset = tf.data.Dataset.from_tensor_slices((x,y))
+iterator = dataset.as_numpy_iterator()
+e = iterator.next()
+dbbatch = tf.data.Dataset.from_tensor_slices((x,y)).batch(4)
+iterator = dbbatch.as_numpy_iterator()
+e = iterator.next()
+
+dataset = tf.data.Dataset.from_tensor_slices(x).window(4)
+dbmapped = dataset.map(lambda x: x.shape)
+iterator = dbmapped.as_numpy_iterator()
+e = iterator.next()
+
+
+
+
 # Important note: The validation set CAN NOT BE DEFINED WHEN USING tf.data.Dataset
 # or generators! Either you define explicitely the validation samples
 # or you provide the whole training set to fit and declare validation_split.
@@ -550,65 +579,325 @@ placeholder = 1
 
 
 
-
-import graspRegression as gr
-
-fields = ["regrasp", "regrasprepetition", "reobject", "reposition", "redynamic",
-          "emg", "ts"]
-x_train, y_train, x_test, y_test, cv_splits = \
-    gr.load_megane_database("D:\\Documenti\\PROJECTS\\20_logReg\\data\\S010_ex1.mat",
-                             fields, train_reps=np.array([1,2,3]), test_reps=np.array([4]),
-                             subsamplerate=1, feature_set=["raw"])
-dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
-
-# how the heck do I create images from windows in the dataset?
-# maybe this can be helpful
-# https://www.tensorflow.org/tutorials/structured_data/time_series#convolution_neural_network
-
-
-myo_cnn_in = keras.Input(shape=(40, 40, 1), name="in")
-x = layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn1")(myo_cnn_in)
-x = layers.BatchNormalization(name="bn1")(x)
-x = layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool1")(x)
-x = layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn2")(x)
-x = layers.BatchNormalization(name="bn2")(x)
-x = layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool2")(x)
-x = layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn3")(x)
-x = layers.BatchNormalization(name="bn3")(x)
-x = layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool3")(x)
-x = layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn4")(x)
-x = layers.BatchNormalization(name="bn4")(x)
-x = layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool4")(x)
-x = layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn5")(x)
-x = layers.BatchNormalization(name="bn5")(x)
-x = layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool5")(x)
-x = layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn6")(x)
-x = layers.BatchNormalization(name="bn6")(x)
-x = layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn7")(x)
-x = layers.BatchNormalization(name="bn7")(x)
-x = layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn8")(x)
-x = layers.BatchNormalization(name="bn8")(x)
-x = layers.Dense(2, activation="relu", name="FC1")(x)
-myo_cnn_out = layers.Dense(1, activation="linear", name="out")(x)
-myo_cnn = keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
-myo_cnn.summary()
-
-myo_cnn.compile(
-    loss=keras.losses.mean_squared_error(),
-    optimizer=keras.optimizers.RMSprop(),
-    metrics=[keras.metrics.mean_squared_error()],
-)
-
-history = myo_cnn.fit(
-    x_train,
-    y_train,
-    batch_size=128,
-    epochs=30,
-    validation_data=(x_val, y_val),
-)
+###############################################################################
+############################# DATASET WINDOWING ###############################
+###############################################################################
+# Requires adaptation because tf.keras.preprocessing.timeseries_dataset_from_array
+# is only available in nightly release, which is unstable. Timeseries.py was downloaded
+# from https://github.com/tensorflow/tensorflow/blob/v2.3.0/tensorflow/python/keras/preprocessing/timeseries.py#L29-L199
+# and added to the path.
+#
+# The idea is to create an window generator object that takes the data and the
+# the characteristics of the desired window and creates a windowed db (internally)
+#
+# The core is the function make_dataset that obtains windowed dataset from the data
+# and applies the function split_window to all the elements. Split data is necessary
+# only if the prediction is one (future) element of the time series.
+# I guess split_data can be adapted to take as target one specific value of the
+# targets array (value corresponding to the head of the window).
+#
+# The "calls" procede this way: create w2=WindowGenerator(...window props, data) object, then
+# call w2.train -> calls make_dataset on the training set applying split_window to each
+# element.
 
 
 
 
+# load pandas a database
+zip_path = tf.keras.utils.get_file(
+    origin='https://storage.googleapis.com/tensorflow/tf-keras-datasets/jena_climate_2009_2016.csv.zip',
+    fname='jena_climate_2009_2016.csv.zip',
+    extract=True)
+csv_path, _ = os.path.splitext(zip_path)
+df = pd.read_csv(csv_path)
+# slice [start:stop:step], starting from index 5 take every 6th record.
+df = df[5::6]
+date_time = pd.to_datetime(df.pop('Date Time'), format='%d.%m.%Y %H:%M:%S')
+df.head()
+df.describe().transpose()
+wv = df['wv (m/s)']
+bad_wv = wv == -9999.0
+wv[bad_wv] = 0.0
+max_wv = df['max. wv (m/s)']
+bad_max_wv = max_wv == -9999.0
+max_wv[bad_max_wv] = 0.0
+# The above inplace edits are reflected in the DataFrame
+timestamp_s = date_time.map(datetime.datetime.timestamp)
+column_indices = {name: i for i, name in enumerate(df.columns)}
+n = len(df)
+train_df = df[0:int(n*0.7)]
+val_df = df[int(n*0.7):int(n*0.9)]
+test_df = df[int(n*0.9):]
+num_features = df.shape[1]
+
+# create window generator class
+class WindowGenerator():
+    def __init__(self, input_width, label_width, shift,
+               train_df, val_df, test_df,
+               label_columns=None):
+        # Store the raw data.
+        self.train_df = train_df
+        self.val_df = val_df
+        self.test_df = test_df
+
+        # Work out the label column indices.
+        self.label_columns = label_columns
+        if label_columns is not None:
+          self.label_columns_indices = {name: i for i, name in
+                                        enumerate(label_columns)}
+        self.column_indices = {name: i for i, name in
+                               enumerate(train_df.columns)}
+
+        # Work out the window parameters.
+        self.input_width = input_width
+        self.label_width = label_width
+        self.shift = shift
+
+        self.total_window_size = input_width + shift
+
+        self.input_slice = slice(0, input_width)
+        self.input_indices = np.arange(self.total_window_size)[self.input_slice]
+
+        self.label_start = self.total_window_size - self.label_width
+        self.labels_slice = slice(self.label_start, None)
+        self.label_indices = np.arange(self.total_window_size)[self.labels_slice]
+
+    def __repr__(self):
+        return '\n'.join([
+            f'Total window size: {self.total_window_size}',
+            f'Input indices: {self.input_indices}',
+            f'Label indices: {self.label_indices}',
+            f'Label column name(s): {self.label_columns}'])
+
+    def split_window(self, features):
+          inputs = features[:, self.input_slice, :]
+          labels = features[:, self.labels_slice, :]
+          if self.label_columns is not None:
+              labels = tf.stack(
+                  [labels[:, :, self.column_indices[name]] for name in self.label_columns],
+                  axis=-1)
+
+          # Slicing doesn't preserve static shape information, so set the shapes
+          # manually. This way the `tf.data.Datasets` are easier to inspect.
+          inputs.set_shape([None, self.input_width, None])
+          labels.set_shape([None, self.label_width, None])
+
+          return inputs, labels
+
+    def plot(self, model=None, plot_col='T (degC)', max_subplots=3):
+          inputs, labels = self.example
+          plt.figure(figsize=(12, 8))
+          plot_col_index = self.column_indices[plot_col]
+          max_n = min(max_subplots, len(inputs))
+          for n in range(max_n):
+              plt.subplot(3, 1, n + 1)
+              plt.ylabel(f'{plot_col} [normed]')
+              plt.plot(self.input_indices, inputs[n, :, plot_col_index],
+                       label='Inputs', marker='.', zorder=-10)
+
+              if self.label_columns:
+                  label_col_index = self.label_columns_indices.get(plot_col, None)
+              else:
+                  label_col_index = plot_col_index
+
+              if label_col_index is None:
+                  continue
+
+              plt.scatter(self.label_indices, labels[n, :, label_col_index],
+                          edgecolors='k', label='Labels', c='#2ca02c', s=64)
+              if model is not None:
+                  predictions = model(inputs)
+                  plt.scatter(self.label_indices, predictions[n, :, label_col_index],
+                              marker='X', edgecolors='k', label='Predictions',
+                              c='#ff7f0e', s=64)
+
+              if n == 0:
+                  plt.legend()
+
+          plt.xlabel('Time [h]')
+
+          return
 
 
+    def make_dataset(self, data):
+          data = np.array(data, dtype=np.float32)
+          from timeseries import timeseries_dataset_from_array # timeseries.py added manually in the path
+          ds = timeseries_dataset_from_array( #tf.keras.preprocessing.timeseries_dataset_from_array(
+              data=data,
+              targets=None,
+              sequence_length=self.total_window_size,
+              sequence_stride=1,
+              shuffle=True,
+              batch_size=32, )
+
+          ds = ds.map(self.split_window)
+
+          return ds
+
+    @property
+    def train(self):
+        return self.make_dataset(self.train_df)
+
+    @property
+    def val(self):
+        return self.make_dataset(self.val_df)
+
+    @property
+    def test(self):
+        return self.make_dataset(self.test_df)
+
+    @property
+    def example(self):
+          """Get and cache an example batch of `inputs, labels` for plotting."""
+          result = getattr(self, '_example', None)
+          if result is None:
+            # No example batch was found, so get one from the `.train` dataset
+            result = next(iter(self.train))
+            # And cache it for next time
+            self._example = result
+          return result
+
+# instantiate a window generator object with the characteristics of the desired window
+# w1 = WindowGenerator(input_width=24, label_width=1, shift=24,
+#                      label_columns=['T (degC)'], train_df=train_df,
+#                      test_df=test_df, val_df=val_df)
+# w1
+# w3 = WindowGenerator(input_width=6, label_width=1, shift=0,
+#                      label_columns=['T (degC)'], train_df=train_df,
+#                      test_df=test_df, val_df=val_df)
+# w3
+
+w2 = WindowGenerator(input_width=6, label_width=1, shift=1,
+                     label_columns=['T (degC)'], train_df=train_df,
+                     test_df=test_df, val_df=val_df)
+w2
+
+# example_window = tf.stack([np.array(train_df[:w2.total_window_size]),
+#                            np.array(train_df[100:100+w2.total_window_size]),
+#                            np.array(train_df[200:200+w2.total_window_size])])
+# example_inputs, example_labels = w2.split_window(example_window)
+# w2.example = example_inputs, example_labels
+
+# create the train/val/test sets within the window generator object
+w2.train
+w2.val
+w2.test
+w2.example
+
+for example_inputs, example_labels in w2.train.take(1):
+  print(f'Inputs shape (batch, time, features): {example_inputs.shape}')
+  print(f'Labels shape (batch, time, features): {example_labels.shape}')
+
+# use the windowed data (for example) in a cnn. More example are available here
+# https://www.tensorflow.org/tutorials/structured_data/time_series
+CONV_WIDTH = 3
+conv_window = WindowGenerator(
+    input_width=CONV_WIDTH,
+    label_width=1,
+    shift=1,
+    label_columns=['T (degC)'])
+
+conv_window
+conv_window.plot()
+plt.title("Given 3h as input, predict 1h into the future.")
+
+conv_model = tf.keras.Sequential([
+    tf.keras.layers.Conv1D(filters=32,
+                           kernel_size=(CONV_WIDTH,),
+                           activation='relu'),
+    tf.keras.layers.Dense(units=32, activation='relu'),
+    tf.keras.layers.Dense(units=1),
+])
+
+multi_step_dense = tf.keras.Sequential([
+    # Shape: (time, features) => (time*features)
+    tf.keras.layers.Flatten(),
+    tf.keras.layers.Dense(units=32, activation='relu'),
+    tf.keras.layers.Dense(units=32, activation='relu'),
+    tf.keras.layers.Dense(units=1),
+    # Add back the time dimension.
+    # Shape: (outputs) => (1, outputs)
+    tf.keras.layers.Reshape([1, -1]),
+])
+print('Input shape:', conv_window.example[0].shape)
+print('Output shape:', multi_step_dense(conv_window.example[0]).shape)
+
+MAX_EPOCHS = 20
+
+def compile_and_fit(model, window, patience=2):
+  early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
+                                                    patience=patience,
+                                                    mode='min')
+
+  model.compile(loss=tf.losses.MeanSquaredError(),
+                optimizer=tf.optimizers.Adam(),
+                metrics=[tf.metrics.MeanAbsoluteError()])
+
+  history = model.fit(window.train, epochs=MAX_EPOCHS,
+                      validation_data=window.val,
+                      callbacks=[early_stopping])
+  return history
+
+history = compile_and_fit(multi_step_dense, conv_window)
+
+import IPython
+val_performance = {}
+performance = {}
+class Baseline(tf.keras.Model):
+  def __init__(self, label_index=None):
+    super().__init__()
+    self.label_index = label_index
+
+  def call(self, inputs):
+    if self.label_index is None:
+      return inputs
+    result = inputs[:, :, self.label_index]
+    return result[:, :, tf.newaxis]
+
+baseline = Baseline(label_index=column_indices['T (degC)'])
+
+baseline.compile(loss=tf.losses.MeanSquaredError(),
+                 metrics=[tf.metrics.MeanAbsoluteError()])
+
+val_performance = {}
+performance = {}
+single_step_window = WindowGenerator(
+    input_width=1, label_width=1, shift=1,
+    label_columns=['T (degC)'])
+single_step_window
+val_performance['Baseline'] = baseline.evaluate(single_step_window.val)
+performance['Baseline'] = baseline.evaluate(single_step_window.test, verbose=0)
+
+IPython.display.clear_output()
+val_performance['Multi step dense'] = multi_step_dense.evaluate(conv_window.val)
+performance['Multi step dense'] = multi_step_dense.evaluate(conv_window.test, verbose=0)
+
+conv_window.plot(multi_step_dense)
+
+wide_window = WindowGenerator(
+    input_width=24, label_width=24, shift=1,
+    label_columns=['T (degC)'])
+
+wide_window
+print('Input shape:', wide_window.example[0].shape)
+try:
+  print('Output shape:', multi_step_dense(wide_window.example[0]).shape)
+except Exception as e:
+  print(f'\n{type(e).__name__}:{e}')
+
+LABEL_WIDTH = 24
+INPUT_WIDTH = LABEL_WIDTH + (CONV_WIDTH - 1)
+wide_conv_window = WindowGenerator(
+  input_width=INPUT_WIDTH,
+  label_width=LABEL_WIDTH,
+  shift=1,
+  label_columns=['T (degC)'])
+
+wide_conv_window
+
+print("Wide conv window")
+print('Input shape:', wide_conv_window.example[0].shape)
+print('Labels shape:', wide_conv_window.example[1].shape)
+print('Output shape:', conv_model(wide_conv_window.example[0]).shape)
+
+wide_conv_window.plot(conv_model)

@@ -20,6 +20,8 @@ import pandas as pd
 import pickle
 from scipy import signal
 
+import tensorflow as tf
+
 
 #############################################################
 ########################## FUNCTIONS ########################
@@ -41,8 +43,7 @@ def generate_mock_binary_clf_database(n_samples, n_features):
     return x_train, x_test, y_train, y_test, cv_splits
 
 
-def load_megane_database(fname, variable_names, train_reps, test_reps, subsamplerate,
-                         feature_set=[]):
+def load_megane_database(fname, variable_names, train_reps, test_reps, subsamplerate, feature_set=[]):
     '''
     Load the desired fields (variable_names) from the megane pro database
     '''
@@ -69,13 +70,12 @@ def load_megane_database(fname, variable_names, train_reps, test_reps, subsample
     #                                      hudgins[89000:92700, 0:4])),
     #                           title="Raw EMG VS hudgins (MAV, nzc, nssc, wl) EMG")
 
-    if "raw" in feature_set:
-        feature_set = []
-
     # preprocessing
     data["emg"] = preprocess(data["emg"], feature_set=feature_set)
 
     # feature extraction
+    if "im" in feature_set: # do nothing
+        placeholder = 1
     if "hudgins" in feature_set:
         data["emg"] = extract_hudgins_features(data["emg"], w_dim=400, stride=20)
         data["regrasp"] = subsample_data_window_based(
@@ -99,6 +99,52 @@ def load_megane_database(fname, variable_names, train_reps, test_reps, subsample
                                                              debug_plot=False,
                                                              subsamplerate=subsamplerate)
     return x_train, y_train, x_test, y_test, cv_splits
+
+
+def extract_hudgins_features(emg, w_dim=400, stride=20):
+    """
+    Extraction of hudgins features on moving window.
+    """
+
+    assert len(emg.shape) <= 2
+    if len(emg.shape) == 1:
+        x = emg[:,None]
+    else:
+        x = emg
+    diff_x = np.diff(x, axis=0)  # to avoid re-calculations
+
+    # mav
+    mav = moving_function(np.abs(x), "mean", w_dim, stride)
+
+    # num zero crossings
+    zc = np.vstack((np.zeros(x.shape[1]),
+                    np.diff(x>=0, axis=0)))
+    n_zc = moving_function(zc, "sum", w_dim, stride)
+
+    # num slope sign changes
+    t = 0 # 0.000001 threshold may be determined observing f,b = np.histogram(np.abs(diff_x.ravel()),bins=1000)
+    ssc = np.logical_and(
+        np.vstack((np.zeros(x.shape[1]), np.diff(diff_x>=0, axis=0)!=0, np.zeros(x.shape[1]))),
+        np.logical_or(np.vstack((np.abs(diff_x)>=t, np.zeros(x.shape[1]))), # samples followed by a big jump
+        np.vstack((np.zeros(x.shape[1]), np.flipud(np.abs(np.diff(np.flipud(x), axis=0))>=t)))) # samples preceeded by a big jump
+        )
+    n_ssc = moving_function(ssc, "sum", w_dim, stride)
+
+    # waveform length
+    wl = moving_function(np.abs(diff_x), "behaded_sum", w_dim, stride)
+
+    # put all together mav0, nzc0, nssc0, wl0, mav1, nzc1, ...
+    n_feats = 4  # number of features to be computed
+    n_w = 1 + np.floor_divide(x.shape[0] - w_dim, stride)  # number of resulting windows, i.e. samples
+    n_feats_tot = x.shape[1] * n_feats
+    emg = np.empty((n_w, n_feats_tot))
+    for i in range(x.shape[1]):
+        emg[:, i*4] = mav[:,i]
+        emg[:, i*4+1] = n_zc[:, i]
+        emg[:, i*4+2] = n_ssc[:, i]
+        emg[:, i*4+3] = wl[:, i]
+
+    return emg
 
 
 def convert_label(label):
@@ -500,23 +546,24 @@ def main():
                         help="how much to subsample the training set. A value v corresponds"
                              "to a subsampling of 1:v. Default: 1.")
 
-    parser.add_argument("--featureset", required=False, default="raw",
-                        help="which feature set to use, for example raw, hudgins or"
+    parser.add_argument("--featureset", required=False, default="im",
+                        help="which feature set to use, for example im (interactive "
+                             "myocontrol), hudgins or"
                              'a combination of features "hudgins rms".'
-                             'Default: "raw".')
+                             'Default: "im".')
     parser.add_argument("--scalex", required=False, default="no",
-                        choices=["yes", "no"],
+                        choices=["yes","no"],
                         help="whether to normalize the emg or not (yes/no). Default: no.")
 
     parser.add_argument("--transformx", required=True, default="none",
-                        choices=["none", "rff", "rbf"],
+                        choices=["none","rff","rbf"],
                         help="how to transform the Xs (none, rff, rbf). Default: none.")
     parser.add_argument("--numRFFseeds", required=False, default=1, type=int,
                         help="on how many seeds to average the RFFs, in case they were "
                              "used. Default: 1.")
 
     parser.add_argument("--transformy", required=True, default="none",
-                        choices=["none", "logit", "arctanh"],
+                        choices=["none","logit","arctanh"],
                         help="how to transform the Ys (none, logit, arctanh). "
                              "Default: none.")
 
@@ -553,45 +600,24 @@ def main():
         Cs_vec = [1.0]
 
     feature_set = str.split(args.featureset, " ")
-    allowed_features = ["raw", "hudgins"]
+    allowed_features = ["im", "hudgins"]
     assert all(item in allowed_features for item in feature_set), "invalid feature_set"
-    if "raw" in feature_set:
-        feature_set = ["raw"]
-
-    if args.transformx == "rff":
-        n_rff = 300
-        n_seeds_rff = args.numRFFseeds if args.transformx == "rff" else 1
-        rff_seeds_vec = np.arange(n_seeds_rff)
-
-    if args.transformx == "rbf":
-        n_rbf = 100
+    if "im" in feature_set:
+        feature_set = ["im"]
 
     if args.transformy == "none":
         targetTransform = None
-    elif args.transformy == "logit":
-        targetTransform = FunctionTransformer(func=compute_logit,
-                                              inverse_func=compute_inverse_logit)
-    elif args.transformy == "arctanh":
-        targetTransform = FunctionTransformer(func=compute_arctanh,
-                                              inverse_func=compute_inverse_arctanh)
 
     db_suffix = os.path.basename(args.datapath).split(".")[0].replace("_", "") + "_"
-    feature_suffix = "raw" + "_" if "raw" in feature_set else "".join(feature_set) + "_"
+    feature_suffix = "im" + "_" if "im" in feature_set else "".join(feature_set) + "_"
     if args.transformx == "none":
         xtransform_suffix = "notransfx" + "_"
-    elif args.transformx == "rff":
-        xtransform_suffix = str(n_rff) + "rffx" + str(n_seeds_rff) + "s" + "_"
-    elif args.transformx == "rbf":
-        xtransform_suffix = str(n_rbf) + "rbfx" + "_"
     scaling_suffix = "scaledx" + "_" if args.scalex == "yes" else "unscaledx" + "_"
     if args.transformy == "none":
         ytransform_suffix = "notransfy" + "_"
-    elif args.transformy == "logit":
-        ytransform_suffix = "logity" + "_"
-    elif args.transformy == "arctanh":
-        ytransform_suffix = "arctanhy" + "_"
     hypopt_suffix = "ho_" if args.hypopt == "yes" else "nho_"
     algo_suffix = args.algo + "_"
+
     if args.saveoutput:
         out_dirname = os.path.join(args.saveoutput, db_suffix.replace("_", "")) + "\\"
         out_fname = out_dirname + \
@@ -614,9 +640,60 @@ def main():
             load_megane_database(args.datapath, fields, train_reps, test_reps,
                                  args.subsamplerate, feature_set)
 
+    ########################### Create tensor db and window it ##########################
+
+    # somehow...
+
+    dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+
+    # how the heck do I create images from windows in the dataset?
+    # maybe this can be helpful
+    # https://www.tensorflow.org/tutorials/structured_data/time_series#convolution_neural_network
+
+
     #################################### CNN ##########################################
 
 
+    myo_cnn_in = tf.keras.Input(shape=(40, 40, 1), name="in")
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn1")(myo_cnn_in)
+    x = tf.keras.layers.BatchNormalization(name="bn1")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool1")(x)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn2")(x)
+    x = tf.keras.layers.BatchNormalization(name="bn2")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool2")(x)
+    x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn3")(x)
+    x = tf.keras.layers.BatchNormalization(name="bn3")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool3")(x)
+    x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn4")(x)
+    x = tf.keras.layers.BatchNormalization(name="bn4")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool4")(x)
+    x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn5")(x)
+    x = tf.keras.layers.BatchNormalization(name="bn5")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool5")(x)
+    x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn6")(x)
+    x = tf.keras.layers.BatchNormalization(name="bn6")(x)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn7")(x)
+    x = tf.keras.layers.BatchNormalization(name="bn7")(x)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn8")(x)
+    x = tf.keras.layers.BatchNormalization(name="bn8")(x)
+    x = tf.keras.layers.Dense(2, activation="relu", name="FC1")(x)
+    myo_cnn_out = tf.keras.layers.Dense(1, activation="linear", name="out")(x)
+    myo_cnn = tf.keras.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    myo_cnn.summary()
+
+    myo_cnn.compile(
+        loss=tf.keras.losses.mean_squared_error(),
+        optimizer=tf.keras.optimizers.RMSprop(),
+        metrics=[tf.keras.metrics.mean_squared_error()],
+    )
+
+    history = myo_cnn.fit(
+        x_train,
+        y_train,
+        batch_size=128,
+        epochs=30,
+        # validation_data=(x_val, y_val),
+    )
 
 
     print("placeholder")
