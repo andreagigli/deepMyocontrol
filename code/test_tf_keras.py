@@ -496,6 +496,10 @@ labeled_dataset = dataset.map(parse_image)
 for element, label in labeled_dataset.take(1): # (if the dataset has got labels)
     print(label)
 #
+# 4) create dataset from a generator. See https://sknadig.dev/TensorFlow2.0-dataset/
+# It comes handy when you need to generate the db on the fly, or the dataset elements are
+# different views of the same data that you don't want to replicate (e.g. moving window).
+#
 #
 # HOW TO APPLY AN OPERATION TO ALL THE ELEMENTS OF THE DATASET
 # use dataset.map(function)
@@ -517,28 +521,6 @@ model.fit(x_train, y_train, batch_size=64, epochs=2, validation_data=(x_val, y_v
 # or passed explicitely as a Dataset object
 val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val)).batch(64)
 model.fit(train_dataset, epochs=1, validation_data=val_dataset)
-
-x = np.array([0,10,100])[None,:]
-for i in range(20):
-    x = np.vstack((x, x[-1,:]+1))
-y = x[:,0][:,None]
-x.shape
-y.shape
-dataset = tf.data.Dataset.from_tensor_slices((x,y))
-iterator = dataset.as_numpy_iterator()
-e = iterator.next()
-dbbatch = tf.data.Dataset.from_tensor_slices((x,y)).batch(4)
-iterator = dbbatch.as_numpy_iterator()
-e = iterator.next()
-
-dataset = tf.data.Dataset.from_tensor_slices(x).window(4)
-dbmapped = dataset.map(lambda x: x.shape)
-iterator = dbmapped.as_numpy_iterator()
-e = iterator.next()
-
-
-
-
 # Important note: The validation set CAN NOT BE DEFINED WHEN USING tf.data.Dataset
 # or generators! Either you define explicitely the validation samples
 # or you provide the whole training set to fit and declare validation_split.
@@ -559,10 +541,6 @@ dataset = dataset.padded_batch(4, padded_shapes=(None,))
 for batch in dataset.take(2):
     print(batch.numpy())
     print()
-#
-#
-# DATASET WINDOWING https://www.tensorflow.org/guide/data#time_series_windowing and https://www.tensorflow.org/tutorials/structured_data/time_series
-#
 
 # endregion
 
@@ -572,13 +550,12 @@ for batch in dataset.take(2):
 # Example of time series forecasting https://www.tensorflow.org/tutorials/structured_data/time_series
 
 
-placeholder = 1
 
 
 
 
 
-
+# region dataset windowing
 ###############################################################################
 ############################# DATASET WINDOWING ###############################
 ###############################################################################
@@ -795,8 +772,11 @@ conv_window = WindowGenerator(
     input_width=CONV_WIDTH,
     label_width=1,
     shift=1,
-    label_columns=['T (degC)'])
-
+    label_columns=['T (degC)'],
+    train_df=train_df,
+    test_df=test_df,
+    val_df=val_df
+)
 conv_window
 conv_window.plot()
 plt.title("Given 3h as input, predict 1h into the future.")
@@ -822,7 +802,7 @@ multi_step_dense = tf.keras.Sequential([
 print('Input shape:', conv_window.example[0].shape)
 print('Output shape:', multi_step_dense(conv_window.example[0]).shape)
 
-MAX_EPOCHS = 20
+MAX_EPOCHS = 2
 
 def compile_and_fit(model, window, patience=2):
   early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss',
@@ -863,7 +843,10 @@ val_performance = {}
 performance = {}
 single_step_window = WindowGenerator(
     input_width=1, label_width=1, shift=1,
-    label_columns=['T (degC)'])
+    label_columns=['T (degC)'],
+    train_df=train_df,
+    test_df=test_df,
+    val_df=val_df)
 single_step_window
 val_performance['Baseline'] = baseline.evaluate(single_step_window.val)
 performance['Baseline'] = baseline.evaluate(single_step_window.test, verbose=0)
@@ -876,7 +859,10 @@ conv_window.plot(multi_step_dense)
 
 wide_window = WindowGenerator(
     input_width=24, label_width=24, shift=1,
-    label_columns=['T (degC)'])
+    label_columns=['T (degC)'],
+    train_df=train_df,
+    test_df=test_df,
+    val_df=val_df)
 
 wide_window
 print('Input shape:', wide_window.example[0].shape)
@@ -891,7 +877,10 @@ wide_conv_window = WindowGenerator(
   input_width=INPUT_WIDTH,
   label_width=LABEL_WIDTH,
   shift=1,
-  label_columns=['T (degC)'])
+  label_columns=['T (degC)'],
+    train_df=train_df,
+    test_df=test_df,
+    val_df=val_df)
 
 wide_conv_window
 
@@ -901,3 +890,5 @@ print('Labels shape:', wide_conv_window.example[1].shape)
 print('Output shape:', conv_model(wide_conv_window.example[0]).shape)
 
 wide_conv_window.plot(conv_model)
+
+# endregion
