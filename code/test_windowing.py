@@ -4,6 +4,43 @@ from tensorflow.keras import layers
 import numpy as np
 from sklearn.datasets import make_regression
 import matplotlib.pyplot as plt
+from tensorflow.keras.callbacks import TensorBoard
+import time
+
+def createSlidingWindowGenerator(data,label,w):
+    # returns generator that implements sliding window along the first dimension of data and label
+    for i in range(len(data)-w+1):
+        # generate sliding window of indices. By using "yield" i is incremented
+        # (by 1 in this case) anytime the generator is used, the window
+        # idx = [i, i+1, i+2, ..., i+w] is created, and the value data[idx] and
+        # label[idx] is yielded.
+        yield data[np.arange(i,i+w)], label[i+w-1]
+def plotHistory(history, metrics = [], plot_validation=False):
+    fig = plt.figure()
+    ax1 = fig.add_subplot(211)
+    for metric in metrics:
+        plt.plot(history.history[metric], label=metric)
+        if plot_validation:
+            plt.plot(history.history["val_"+metric], label="val_"+metric)
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Metric")
+    ax1.legend(loc='lower right')
+    ax2 = fig.add_subplot(212)
+    plt.plot(history.history["loss"], label="loss")
+    if plot_validation:
+        plt.plot(history.history["val_loss"], label="val_loss")
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("Loss")
+    ax2.legend(loc='lower right')
+def getDbLabels(dataset):
+    labels = []
+    for _, y in test_expanded_shuffled:  # only take first element of dataset
+        labels.append(y.numpy())
+    return np.vstack(labels)
+
+
+# logs
+NAME = "toy_windowing_CNN_{}".format(int(time.time()))
 
 # moving window using Dataset.from_generator
 # examples of how to use from_generator here https://sknadig.dev/TensorFlow2.0-dataset/
@@ -19,53 +56,7 @@ print(x.shape)
 print(y.shape)
 
 
-def createSlidingWindowGenerator(data,label,w):
-    # returns generator that implements sliding window along the first dimension of data and label
-    for i in range(len(data)-w+1):
-        # generate sliding window of indices. By using "yield" i is incremented
-        # (by 1 in this case) anytime the generator is used, the window
-        # idx = [i, i+1, i+2, ..., i+w] is created, and the value data[idx] and
-        # label[idx] is yielded.
-        yield data[np.arange(i,i+w)], label[i+w-1]
 
-# xy_gen = createSlidingWindowGenerator(x,y,3)
-# for window in xy_gen:
-#     print(window)
-#
-# xy_gen = createSlidingWindowGenerator(x,y,3)
-# list_windows = list(xy_gen)
-# list_windows[0]
-# list_windows[1]
-#
-# xy_gen = createSlidingWindowGenerator(x,y,3)
-# next(xy_gen)
-
-# dataset = tf.data.Dataset.from_generator(createSlidingWindowGenerator,
-#                                          output_types=(tf.float32, tf.float32),
-#                                          output_shapes=(tf.TensorShape([3,3]), tf.TensorShape([2])),
-#                                          args=[x,y,3])
-# iterator = dataset.as_numpy_iterator()
-# el = next(iterator)
-# print(el[0].shape)
-# print(el[1].shape)
-#
-# dataset_expanded = dataset.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
-# iterator = dataset_expanded.as_numpy_iterator()
-# el = next(iterator)
-# print(el[0].shape)
-# print(el[1].shape)
-#
-# dataset_expanded_shuffled = dataset_expanded.shuffle(1000)
-# iterator = dataset_expanded_shuffled.as_numpy_iterator()
-# el = next(iterator)
-# print(el[0].shape)
-# print(el[1].shape)
-#
-# dataset_expanded_shuffled_batched = dataset_expanded_shuffled.batch(128)
-# iterator = dataset_expanded_shuffled_batched.as_numpy_iterator()
-# el = next(iterator)
-# print(el[0].shape)
-# print(el[1].shape)
 
 
 dataset = tf.data.Dataset.from_generator(createSlidingWindowGenerator,
@@ -91,6 +82,7 @@ val_expanded = val_dataset.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
 val_expanded_shuffled = val_expanded.shuffle(1000)
 val_expanded_shuffled_batched = val_expanded_shuffled.batch(128)
 
+
 model_input = keras.Input(shape=(3, 3, 1), name="img")
 x = layers.Conv2D(16, 3, activation="relu")(model_input)
 x = layers.Flatten()(x)
@@ -98,41 +90,35 @@ model_output = layers.Dense(2)(x)
 model = keras.Model(inputs=model_input, outputs=model_output, name="my_cnn")
 model.summary()
 
+# using tensorboard to visualize the model's evolution in realtime
+# instructions here https://pythonprogramming.net/tensorboard-analysis-deep-learning-python-tensorflow-keras/
+# (use callback to tensorflow in fit, run an instance of tensorflow indicating the log folder,
+# open the give url in the browser.)
+tensorboard = TensorBoard(log_dir="logs\\{}".format(NAME))
+
 model.compile(
     loss=tf.losses.MeanSquaredError(),
     optimizer=keras.optimizers.RMSprop(),
     metrics=["mse"],
 )
 
-history = model.fit(x=train_expanded_shuffled_batched, validation_data=val_expanded_shuffled_batched, epochs=200)
 
-def plotHistory(history, metrics = [], plot_validation=False):
-    fig = plt.figure()
-    ax1 = fig.add_subplot(211)
-    for metric in metrics:
-        plt.plot(history.history[metric], label=metric)
-        if plot_validation:
-            plt.plot(history.history["val_"+metric], label="val_"+metric)
-    ax1.set_xlabel("Epoch")
-    ax1.set_ylabel("Metric")
-    ax1.legend(loc='lower right')
-    ax2 = fig.add_subplot(212)
-    plt.plot(history.history["loss"], label="loss")
-    if plot_validation:
-        plt.plot(history.history["val_loss"], label="val_loss")
-    ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("Loss")
-    ax2.legend(loc='lower right')
-
+history = model.fit(x=train_expanded_shuffled_batched,
+                    validation_data=val_expanded_shuffled_batched,
+                    epochs=50,
+                    callbacks=[tensorboard])
 plotHistory(history, metrics=["mse"], plot_validation=True)
 
-test_loss, test_mse = model.evaluate(test_expanded_shuffled_batched, verbose=2)
 
 test_predictions = model.predict(test_expanded_shuffled_batched)
-test_labels = []
-for _, labels in test_expanded_shuffled_batched:  # only take first element of dataset
-    test_labels.append(labels.numpy())
-test_labels = np.vstack(test_labels)
+test_labels = getDbLabels(test_expanded_shuffled_batched)
+test_mse = tf.keras.metrics.MSE(test_labels, test_predictions)
+print(test_mse) # the two mse differ a little, possibly because the loss is not computed on the last batch (incomplete batch discarded)
+test_loss, test_mse = model.evaluate(test_expanded_shuffled_batched, verbose=2)
+print(test_mse)
+
+
+# plot results as scatter plot
 plt.figure()
 plt.axes(aspect='equal')
 plt.scatter(test_labels[:,0], test_predictions[:,0])
@@ -143,7 +129,6 @@ plt.axes(aspect='equal')
 plt.scatter(test_labels[:,1], test_predictions[:,1])
 plt.xlabel('True Values')
 plt.ylabel('Predictions')
-
 plt.show()
 
 
