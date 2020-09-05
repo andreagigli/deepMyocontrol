@@ -16,10 +16,7 @@ from sklearn.metrics import r2_score, explained_variance_score, mean_absolute_er
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
-import pandas as pd
-import pickle
 from scipy import signal
-
 import tensorflow as tf
 
 
@@ -28,9 +25,9 @@ import tensorflow as tf
 #############################################################
 
 def generate_mock_binary_clf_database(n_samples, n_features):
-    '''
+    """
     Generate a mock database for binary classification
-    '''
+    """
 
     X, y = make_classification(n_samples=n_samples, n_features=n_features,
                                random_state=1, n_classes=2)
@@ -44,9 +41,9 @@ def generate_mock_binary_clf_database(n_samples, n_features):
 
 
 def load_megane_database(fname, variable_names, train_reps, test_reps, subsamplerate, feature_set=[]):
-    '''
+    """
     Load the desired fields (variable_names) from the megane pro database
-    '''
+    """
 
     data = loadmat(fname, variable_names=variable_names[:])
 
@@ -122,7 +119,8 @@ def extract_hudgins_features(emg, w_dim=400, stride=20):
     n_zc = moving_function(zc, "sum", w_dim, stride)
 
     # num slope sign changes
-    t = 0 # 0.000001 threshold may be determined observing f,b = np.histogram(np.abs(diff_x.ravel()),bins=1000)
+    t = 0 # 0.000001 threshold may be determined observing f,b = np.histogram(np.abs(
+    # diff_x.ravel()),bins=1000)
     ssc = np.logical_and(
         np.vstack((np.zeros(x.shape[1]), np.diff(diff_x>=0, axis=0)!=0, np.zeros(x.shape[1]))),
         np.logical_or(np.vstack((np.abs(diff_x)>=t, np.zeros(x.shape[1]))), # samples followed by a big jump
@@ -148,7 +146,7 @@ def extract_hudgins_features(emg, w_dim=400, stride=20):
 
 
 def convert_label(label):
-    '''
+    """
     Converts the grasp label (column (re)grasp) into a regression-like target
     value. Grasp types are converted into the 6dof configuration of the fingers.
     Multiple* grasp types are converted to a simple power grasp [1,0,1,1,1,1]..
@@ -164,7 +162,7 @@ def convert_label(label):
     8, index finger extension, [1,0,0,1,1,1]
     9, adducted thumb, [0,1,1,1,1,1]
     10, prismatic four finger, [1,0,1,1,1,0]
-    '''
+    """
 
     regression_label = np.zeros((label.shape[0], 6))
     actions_dict = {0: [0, 0, 0, 0, 0, 0], 1: [1, 0, 1, 1, 1, 1], 2: [1, 1, 1, 1, 1, 1],
@@ -177,9 +175,9 @@ def convert_label(label):
 
 
 def subsample_data_window_based(x, w_dim, stride=1):
-    '''
+    """
     Subsample the labels in case window features have been extracted
-    '''
+    """
 
     idx = np.arange(w_dim - 1, x.shape[0], stride)
     if len(x.shape) == 1:
@@ -226,12 +224,12 @@ def preprocess(emg, feature_set=[]):
 
 
 def moving_function(data, func, w_dim, stride=1):
-    '''
+    """
     Optimized computation of cumulative functions over a moving window.
     Data can be 1 or 2 dimensional array.
     Options for the function are "sum", "mean", "beheaded_sum".
     The "beheaded_sum" sums all the elements except the last in the window.
-    '''
+    """
 
     assert len(data.shape) <= 2
     if len(data.shape) == 1:  # if 1d array -> make column array
@@ -343,9 +341,9 @@ def split_data(data, train_reps, test_reps, debug_plot=False, subsamplerate=1):
 
 
 def compute_cv_splits(data, idx_train, train_reps, debug_plot, subsample_cv=False):
-    '''
+    """
 
-    '''
+    """
 
     reps_x_train = data["regrasprepetition"][idx_train, :]
     dyn_x_train = data["redynamic"][idx_train, :]
@@ -410,9 +408,9 @@ def compute_cv_splits(data, idx_train, train_reps, debug_plot, subsample_cv=Fals
 
 
 def goodness_of_fit(Ytrue, Ypred, verbose=0):
-    '''
+    """
     Compute r2, expl_var, mae, rmse, nmae, nrmse for multiple regression.
-    '''
+    """
 
     metrics = {}
     metrics["r2"] = round(r2_score(Ytrue, Ypred, multioutput="uniform_average"),
@@ -453,10 +451,10 @@ def goodness_of_fit(Ytrue, Ypred, verbose=0):
 
 
 def idxmask2binmask(m, coeff=1):
-    '''
+    """
     Converts an indices mask to a binary mask. The binary mask is == 1 in all
     the indices contained in the mask, and 0 otherwise.
-    '''
+    """
     m = np.array(m)
     assert len(m.shape) == 1 or (
             len(m.shape) == 2 and (m.shape[0] == 1 or m.shape[1] == 1))
@@ -469,13 +467,13 @@ def idxmask2binmask(m, coeff=1):
 
 
 def quick_visualize_vec(data, overlay_data=None, title="", continue_on_fig=None):
-    '''
+    """
     Multiple line subplots, one for each column (up to the 12th column).
     If two matrices (data and overlay_data) are passed, the second will be overlayed
     to the first one.
     If a figure handle is passed, the function will try to plot the data
     on that function (num_subplots must be equal to num columns!).
-    '''
+    """
 
     if len(data.shape) > 2:
         print("Only 1 and 2d arrays are accepted")
@@ -520,9 +518,6 @@ def rescaleysubplots(fig, ylim):
     for ax in fig.axes:
         ax.set_ylim(ylim[0], ylim[1])
     return fig
-
-
-
 
 
 #############################################################

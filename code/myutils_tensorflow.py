@@ -2,8 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import warnings
 
+# region dataset manipulation
 
-def create_sliding_window_generator(data, label, w):
+def create_sliding_window_generator(data, label, w_len, w_stride=1):
     """ Implements sliding window by defining a generator over data and label.
 
     Creates a generator that produces sliding windows along the first dimension
@@ -13,12 +14,43 @@ def create_sliding_window_generator(data, label, w):
     to use tf.data.Dataset.from_generator()
     """
 
-    for i in range(len(data) - w + 1):
+    n_windows = int((len(data) - w_len) / w_stride) + 1
+    for i in range(n_windows):
         # anytime the generator is used, i is incremented by 1, a window of indices is
         # computed as idx_current_window = [i, i+1, i+2, ..., i+w] and the indexed data
         # is yielded data[idx_current_window], label[idx_current_window]
-        yield data[np.arange(i, i + w)], label[i + w - 1]
+        idx = np.arange(i*w_stride,i*w_stride+w_len)
+        yield data[idx], label[idx[-1]]
 
+
+# endregion
+
+
+# region dataset info
+
+def get_db_labels(dataset):
+    """ Return the labels of a Tensorflow dataset as numpy array.
+
+    It works both for un-batched and batched datasets.
+    If the dataset does not contain labels, then return an empty array.
+    """
+
+    if len(dataset.as_numpy_iterator().next()) != 2:
+        labels = np.array([])
+        warnings.warn("The dataset does not contain labels")
+    else:
+        labels = []
+        for _, y in dataset:  # only take first element of dataset
+            labels.append(y.numpy())
+        labels = np.vstack(labels)
+
+    return labels
+
+
+# endregion
+
+
+# region plotting
 
 def plot_history(history, metrics=None, plot_validation=False):
     """ Plots the fitting history of a Tensorflow model.
@@ -49,25 +81,6 @@ def plot_history(history, metrics=None, plot_validation=False):
     return fig
 
 
-def get_db_labels(dataset):
-    """ Return the labels of a Tensorflow dataset as numpy array.
-
-    It works both for un-batched and batched datasets.
-    If the dataset does not contain labels, then return an empty array.
-    """
-
-    if len(dataset.as_numpy_iterator().next()) != 2:
-        labels = np.array([])
-        warnings.warn("The dataset does not contain labels")
-    else:
-        labels = []
-        for _, y in dataset:  # only take first element of dataset
-            labels.append(y.numpy())
-        labels = np.vstack(labels)
-
-    return labels
-
-
 def scatter_1d_pred(y_true, y_pred):
     """ Plots 1-dim y_true against 1-dim y_pred as a 2-dim scatter plot.
 
@@ -85,3 +98,5 @@ def scatter_1d_pred(y_true, y_pred):
     plt.ylabel('Predictions')
 
     return plt
+
+# endregion

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import TensorBoard
 import time
 
-import tensorflow_utilities as tf_util
+import myutils_tensorflow as tf_util
 
 
 # logs
