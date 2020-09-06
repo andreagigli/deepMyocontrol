@@ -1,4 +1,21 @@
 # -*- coding: utf-8 -*-
+"""Simultaneous and proportional control using regression-CNN.
+
+Data from MeganePro dataset 1
+https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/1Z3IOM
+
+CNN architecture adapted from
+Ameri, Ali, et al. "Regression convolutional neural network for improved simultaneous
+EMG control." Journal of neural engineering 16.3 (2019): 036015.
+
+example call:
+python deepGraspRegression.py
+--datapath ..\data\S010_ex1.mat
+--scalex no
+--algo cnn
+--window 400
+--stride 20
+"""
 
 import argparse
 import os
@@ -19,83 +36,10 @@ from sklearn.model_selection import KFold
 from scipy import signal
 import tensorflow as tf
 
-
-#############################################################
-########################## FUNCTIONS ########################
-#############################################################
-
-def generate_mock_binary_clf_database(n_samples, n_features):
-    """
-    Generate a mock database for binary classification
-    """
-
-    X, y = make_classification(n_samples=n_samples, n_features=n_features,
-                               random_state=1, n_classes=2)
-    y = y[:, None]
-    y = np.hstack((y, 1 - y))
-    x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.33,
-                                                        shuffle=False)
-    kf = KFold(n_splits=3)
-    cv_splits = list(kf.split(x_train, y_train))
-    return x_train, x_test, y_train, y_test, cv_splits
+import myutils_tensorflow as tf_util
 
 
-def load_megane_database(fname, variable_names, train_reps, test_reps, subsamplerate, feature_set=[]):
-    """
-    Load the desired fields (variable_names) from the megane pro database
-    """
-
-    data = loadmat(fname, variable_names=variable_names[:])
-
-    # debug
-    # emg = data["emg"][:,0]
-    # preprocessed_nofeat = preprocess(emg, feature_set=[])
-    # hudgins = preprocess(emg, feature_set=["hudgins"])
-    # hudgins = extract_hudgins_features(hudgins, w_dim=400, stride=20)
-    # subs_emg = subsample_data_window_based(emg, 400, 20)
-    #
-    # fig0 = quick_visualize_vec(data["emg"], title="Raw EMG")
-    #
-    # fig1 = quick_visualize_vec(emg[1780000:1855000], title="Raw EMG detail")
-    #
-    # fig2 = quick_visualize_vec(emg[1780000:1855000])
-    # fig2 = quick_visualize_vec(preprocessed_nofeat[1780000:1855000],
-    #                           title="Raw EMG VS filtered no_feat EMG",
-    #                           continue_on_fig=fig2)
-    #
-    # fig3 = quick_visualize_vec(np.hstack((subs_emg[:,None][89000:92700,:],
-    #                                      hudgins[89000:92700, 0:4])),
-    #                           title="Raw EMG VS hudgins (MAV, nzc, nssc, wl) EMG")
-
-    # preprocessing
-    data["emg"] = preprocess(data["emg"], feature_set=feature_set)
-
-    # feature extraction
-    if "im" in feature_set: # do nothing
-        placeholder = 1
-    if "hudgins" in feature_set:
-        data["emg"] = extract_hudgins_features(data["emg"], w_dim=400, stride=20)
-        data["regrasp"] = subsample_data_window_based(
-            data["regrasp"], w_dim=400, stride=20)
-        data["regrasprepetition"] = subsample_data_window_based(
-            data["regrasprepetition"], w_dim=400, stride=20)
-        data["ts"] = subsample_data_window_based(
-            data["ts"], w_dim=400, stride=20)
-        data["reobject"] = subsample_data_window_based(
-            data["reobject"], w_dim=400, stride=20)
-        data["reposition"] = subsample_data_window_based(
-            data["reposition"], w_dim=400, stride=20)
-        data["redynamic"] = subsample_data_window_based(
-            data["redynamic"], w_dim=400, stride=20)
-
-    data["regrasp"] = convert_label(data["regrasp"])
-
-    # split database
-    x_train, y_train, x_test, y_test, cv_splits = split_data(data, train_reps,
-                                                             test_reps,
-                                                             debug_plot=False,
-                                                             subsamplerate=subsamplerate)
-    return x_train, y_train, x_test, y_test, cv_splits
+# region functions hudgins features
 
 
 def extract_hudgins_features(emg, w_dim=400, stride=20):
@@ -105,7 +49,7 @@ def extract_hudgins_features(emg, w_dim=400, stride=20):
 
     assert len(emg.shape) <= 2
     if len(emg.shape) == 1:
-        x = emg[:,None]
+        x = emg[:, None]
     else:
         x = emg
     diff_x = np.diff(x, axis=0)  # to avoid re-calculations
@@ -115,17 +59,21 @@ def extract_hudgins_features(emg, w_dim=400, stride=20):
 
     # num zero crossings
     zc = np.vstack((np.zeros(x.shape[1]),
-                    np.diff(x>=0, axis=0)))
+                    np.diff(x >= 0, axis=0)))
     n_zc = moving_function(zc, "sum", w_dim, stride)
 
     # num slope sign changes
-    t = 0 # 0.000001 threshold may be determined observing f,b = np.histogram(np.abs(
+    t = 0  # 0.000001 threshold may be determined observing f,b = np.histogram(np.abs(
     # diff_x.ravel()),bins=1000)
     ssc = np.logical_and(
-        np.vstack((np.zeros(x.shape[1]), np.diff(diff_x>=0, axis=0)!=0, np.zeros(x.shape[1]))),
-        np.logical_or(np.vstack((np.abs(diff_x)>=t, np.zeros(x.shape[1]))), # samples followed by a big jump
-        np.vstack((np.zeros(x.shape[1]), np.flipud(np.abs(np.diff(np.flipud(x), axis=0))>=t)))) # samples preceeded by a big jump
-        )
+        np.vstack((np.zeros(x.shape[1]), np.diff(diff_x >= 0, axis=0) != 0,
+                   np.zeros(x.shape[1]))),
+        np.logical_or(np.vstack((np.abs(diff_x) >= t, np.zeros(x.shape[1]))),
+                      # samples followed by a big jump
+                      np.vstack((np.zeros(x.shape[1]),
+                                 np.flipud(np.abs(np.diff(np.flipud(x), axis=0)) >= t))))
+        # samples preceeded by a big jump
+    )
     n_ssc = moving_function(ssc, "sum", w_dim, stride)
 
     # waveform length
@@ -133,58 +81,17 @@ def extract_hudgins_features(emg, w_dim=400, stride=20):
 
     # put all together mav0, nzc0, nssc0, wl0, mav1, nzc1, ...
     n_feats = 4  # number of features to be computed
-    n_w = 1 + np.floor_divide(x.shape[0] - w_dim, stride)  # number of resulting windows, i.e. samples
+    n_w = 1 + np.floor_divide(x.shape[0] - w_dim,
+                              stride)  # number of resulting windows, i.e. samples
     n_feats_tot = x.shape[1] * n_feats
     emg = np.empty((n_w, n_feats_tot))
     for i in range(x.shape[1]):
-        emg[:, i*4] = mav[:,i]
-        emg[:, i*4+1] = n_zc[:, i]
-        emg[:, i*4+2] = n_ssc[:, i]
-        emg[:, i*4+3] = wl[:, i]
+        emg[:, i * 4] = mav[:, i]
+        emg[:, i * 4 + 1] = n_zc[:, i]
+        emg[:, i * 4 + 2] = n_ssc[:, i]
+        emg[:, i * 4 + 3] = wl[:, i]
 
     return emg
-
-
-def convert_label(label):
-    """
-    Converts the grasp label (column (re)grasp) into a regression-like target
-    value. Grasp types are converted into the 6dof configuration of the fingers.
-    Multiple* grasp types are converted to a simple power grasp [1,0,1,1,1,1]..
-    Original grasps:
-    0, resting hand, [0,0,0,0,0,0]
-    1, medium wrap*, [1,0,1,1,1,1]
-    2, lateral, [1,1,1,1,1,1]
-    3, parallel extension*, [1,0,1,1,1,1]
-    4, tripod grasp, [1,0,1,1,0,0]
-    5, power sphere*, [1,0,1,1,1,1]
-    6, precision disk*, [1,0,1,1,1,1]
-    7, prismatic pinch, [1,0,1,0,0,0]
-    8, index finger extension, [1,0,0,1,1,1]
-    9, adducted thumb, [0,1,1,1,1,1]
-    10, prismatic four finger, [1,0,1,1,1,0]
-    """
-
-    regression_label = np.zeros((label.shape[0], 6))
-    actions_dict = {0: [0, 0, 0, 0, 0, 0], 1: [1, 0, 1, 1, 1, 1], 2: [1, 1, 1, 1, 1, 1],
-                    3: [1, 0, 1, 1, 1, 1], 4: [1, 0, 1, 1, 0, 0], 5: [1, 0, 1, 1, 1, 1],
-                    6: [1, 0, 1, 1, 1, 1], 7: [1, 0, 1, 0, 0, 0], 8: [1, 0, 0, 1, 1, 1],
-                    9: [0, 1, 1, 1, 1, 1], 10: [1, 0, 1, 1, 1, 0]}
-    for i in range(len(label)):
-        regression_label[i] = actions_dict.get(label[i][0])
-    return regression_label
-
-
-def subsample_data_window_based(x, w_dim, stride=1):
-    """
-    Subsample the labels in case window features have been extracted
-    """
-
-    idx = np.arange(w_dim - 1, x.shape[0], stride)
-    if len(x.shape) == 1:
-        x = x[idx]
-    else:
-        x = x[idx, :]
-    return x
 
 
 def butter_bandpass(lowcut, highcut, fs, order=5):
@@ -199,6 +106,50 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     b, a = butter_bandpass(lowcut, highcut, fs, order=order)
     y = lfilter(b, a, data, axis=0)
     return y
+
+
+# endregion
+
+
+# region functions megane pro
+
+
+def load_megane_database(fname, variable_names, train_reps, test_reps, subsamplerate,
+                         feature_set=[], w_len=400, w_stride=20):
+    """ Load the desired fields (variable_names) from the megane pro database
+    """
+
+    data = loadmat(fname, variable_names=variable_names[:])
+
+    # preprocessing
+    data["emg"] = preprocess(data["emg"], feature_set=feature_set)
+
+    # feature extraction
+    if "im" in feature_set:  # do nothing
+        placeholder = 1
+    if "hudgins" in feature_set:
+        data["emg"] = extract_hudgins_features(data["emg"], w_dim=w_len, stride=w_stride)
+        data["regrasp"] = subsample_data_window_based(
+            data["regrasp"], w_dim=w_len, stride=w_stride)
+        data["regrasprepetition"] = subsample_data_window_based(
+            data["regrasprepetition"], w_dim=w_len, stride=w_stride)
+        data["ts"] = subsample_data_window_based(
+            data["ts"], w_dim=w_len, stride=w_stride)
+        data["reobject"] = subsample_data_window_based(
+            data["reobject"], w_dim=w_len, stride=w_stride)
+        data["reposition"] = subsample_data_window_based(
+            data["reposition"], w_dim=w_len, stride=w_stride)
+        data["redynamic"] = subsample_data_window_based(
+            data["redynamic"], w_dim=w_len, stride=w_stride)
+
+    data["regrasp"] = convert_label(data["regrasp"])
+
+    # split database
+    x_train, y_train, x_test, y_test, cv_splits = split_data(data, train_reps,
+                                                             test_reps,
+                                                             debug_plot=False,
+                                                             subsamplerate=subsamplerate)
+    return x_train, y_train, x_test, y_test, cv_splits
 
 
 def preprocess(emg, feature_set=[]):
@@ -257,6 +208,48 @@ def moving_function(data, func, w_dim, stride=1):
         tmp = tmp.ravel()
 
     return tmp
+
+
+def subsample_data_window_based(x, w_dim, stride=1):
+    """
+    Subsample the labels in case window features have been extracted
+    """
+
+    idx = np.arange(w_dim - 1, x.shape[0], stride)
+    if len(x.shape) == 1:
+        x = x[idx]
+    else:
+        x = x[idx, :]
+    return x
+
+
+def convert_label(label):
+    """
+    Converts the grasp label (column (re)grasp) into a regression-like target
+    value. Grasp types are converted into the 6dof configuration of the fingers.
+    Multiple* grasp types are converted to a simple power grasp [1,0,1,1,1,1]..
+    Original grasps:
+    0, resting hand, [0,0,0,0,0,0]
+    1, medium wrap*, [1,0,1,1,1,1]
+    2, lateral, [1,1,1,1,1,1]
+    3, parallel extension*, [1,0,1,1,1,1]
+    4, tripod grasp, [1,0,1,1,0,0]
+    5, power sphere*, [1,0,1,1,1,1]
+    6, precision disk*, [1,0,1,1,1,1]
+    7, prismatic pinch, [1,0,1,0,0,0]
+    8, index finger extension, [1,0,0,1,1,1]
+    9, adducted thumb, [0,1,1,1,1,1]
+    10, prismatic four finger, [1,0,1,1,1,0]
+    """
+
+    regression_label = np.zeros((label.shape[0], 6))
+    actions_dict = {0: [0, 0, 0, 0, 0, 0], 1: [1, 0, 1, 1, 1, 1], 2: [1, 1, 1, 1, 1, 1],
+                    3: [1, 0, 1, 1, 1, 1], 4: [1, 0, 1, 1, 0, 0], 5: [1, 0, 1, 1, 1, 1],
+                    6: [1, 0, 1, 1, 1, 1], 7: [1, 0, 1, 0, 0, 0], 8: [1, 0, 0, 1, 1, 1],
+                    9: [0, 1, 1, 1, 1, 1], 10: [1, 0, 1, 1, 1, 0]}
+    for i in range(len(label)):
+        regression_label[i] = actions_dict.get(label[i][0])
+    return regression_label
 
 
 def split_data(data, train_reps, test_reps, debug_plot=False, subsamplerate=1):
@@ -407,49 +400,6 @@ def compute_cv_splits(data, idx_train, train_reps, debug_plot, subsample_cv=Fals
     return cv_splits
 
 
-def goodness_of_fit(Ytrue, Ypred, verbose=0):
-    """
-    Compute r2, expl_var, mae, rmse, nmae, nrmse for multiple regression.
-    """
-
-    metrics = {}
-    metrics["r2"] = round(r2_score(Ytrue, Ypred, multioutput="uniform_average"),
-                          4)  # "raw_values, "multioutput"
-    metrics["expl_var"] = round(explained_variance_score(Ytrue, Ypred,
-                                                         multioutput="uniform_average"),
-                                4)
-    # average magnitude of the error (same unit as y)
-    metrics["mae"] = round(
-        mean_absolute_error(Ytrue, Ypred, multioutput="uniform_average"), 4)
-    # average squared magnitude of the error (same unit as y), penalizes larger errors
-    metrics["rmse"] = round(np.mean(np.sqrt(
-        mean_squared_error(Ytrue, Ypred, multioutput="raw_values"))), 4)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        # nmae = mae normalized over range(Ytrue) (for each channel) and averaged over all
-        # the outputs.
-        # Analogous to mae, normalized over the range of ytrue to compare it with the nmae
-        # of other datasets with possibly different range.
-        # Can be seen as the "avg magnitude of the error is 13% of the amplitude of ytrue".
-        metrics["nmae"] = round(np.mean(np.nan_to_num(np.divide(
-            mean_absolute_error(Ytrue, Ypred, multioutput="raw_values"),
-            np.ptp(Ytrue, axis=0)))), 4)
-        # nmrse = rmse normalized over var(Ytrue) (for each channel) and averaged over all
-        # the outputs.
-        # Analogous to the rmse, normalized over the range of ytrue to compare it with
-        # the nrmse of other datasets with possibly different range.
-        metrics["nrmse"] = round(np.mean(np.nan_to_num(np.divide(np.sqrt(
-            mean_squared_error(Ytrue, Ypred, multioutput="raw_values")),
-            np.ptp(Ytrue, axis=0)))), 4)
-    if verbose == 1:
-        print("Coefficient of determination R2: " + str(metrics["r2"]))
-        print("Explained Variance: " + str(metrics["expl_var"]))
-        print("Mean Absolute Error: " + str(metrics["mae"]))
-        print("Mean Squared Error: " + str(metrics["rmse"]))
-        print("Range Normalized Mean Absolute Error: " + str(metrics["nmae"]))
-        print("Variance Normalized Mean Squared Error: " + str(metrics["nrmse"]))
-    return metrics
-
-
 def idxmask2binmask(m, coeff=1):
     """
     Converts an indices mask to a binary mask. The binary mask is == 1 in all
@@ -466,14 +416,37 @@ def idxmask2binmask(m, coeff=1):
     return v
 
 
-def quick_visualize_vec(data, overlay_data=None, title="", continue_on_fig=None):
+# endregion
+
+
+# region functions misc
+
+
+def generate_mock_binary_clf_database(n_samples, n_features):
+    """ Generate a mock database for binary classification
     """
+
+    X, y = make_classification(n_samples=n_samples, n_features=n_features,
+                               random_state=1, n_classes=2)
+    y = y[:, None]
+    y = np.hstack((y, 1 - y))
+    x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.33,
+                                                        shuffle=False)
+    kf = KFold(n_splits=3)
+    cv_splits = list(kf.split(x_train, y_train))
+    return x_train, x_test, y_train, y_test, cv_splits
+
+
+def quick_visualize_vec(data, overlay_data=None, title="", continue_on_fig=None, x_axis=None):
+    '''
     Multiple line subplots, one for each column (up to the 12th column).
     If two matrices (data and overlay_data) are passed, the second will be overlayed
     to the first one.
+    If an x_axis is passed, all the columns of the passed data will be plot against the
+    common x_axis.
     If a figure handle is passed, the function will try to plot the data
     on that function (num_subplots must be equal to num columns!).
-    """
+    '''
 
     if len(data.shape) > 2:
         print("Only 1 and 2d arrays are accepted")
@@ -486,6 +459,12 @@ def quick_visualize_vec(data, overlay_data=None, title="", continue_on_fig=None)
     if continue_on_fig and len(continue_on_fig.axes) != data.shape[1]:
         print("The number of data columns and of subplots passed must be the same!")
         return None
+
+    if x_axis is not None:
+        x_axis = x_axis.ravel()
+        if len(x_axis) != data.shape[0]:
+            print("x_axis must be a 1d array of the same size of data.shape[0]")
+            return None
 
     if overlay_data is not None:
         if len(overlay_data.shape) > 2:
@@ -503,31 +482,29 @@ def quick_visualize_vec(data, overlay_data=None, title="", continue_on_fig=None)
         fig = plt.figure(figsize=figaspect(0.5))
         for i in range(1, data.shape[1] + 1):
             ax1 = fig.add_subplot(n_subplot_rows, n_subplot_cols, i)
-            ax1.plot(data[:, i - 1])
-            if overlay_data is not None: ax1.plot(overlay_data[:, i - 1])
+            ax1.plot(data[:, i - 1]) if x_axis is None else ax1.plot(x_axis, data[:, i - 1])
+            if overlay_data is not None:
+                ax1.plot(overlay_data[:, i - 1]) if x_axis is None else ax1.plot(x_axis, overlay_data[:, i - 1])
     else:
         fig = continue_on_fig
         for i in range(data.shape[1]):
-            fig.axes[i].plot(data[:, i])
-            if overlay_data is not None: fig.axes[i].plot(overlay_data[:, i - 1])
+            fig.axes[i].plot(data[:, i]) if x_axis is None else fig.axes[i].plot(x_axis, data[:, i])
+            if overlay_data is not None:
+                fig.axes[i].plot(overlay_data[:, i]) if x_axis is None else fig.axes[i].plot(x_axis, overlay_data[:, i])
     plt.suptitle(title)
     return fig
 
 
-def rescaleysubplots(fig, ylim):
-    for ax in fig.axes:
-        ax.set_ylim(ylim[0], ylim[1])
-    return fig
+# endregion
 
 
-#############################################################
-############################ MAIN ###########################
-#############################################################
 def main():
-    ################################## parse parameters #################################
+
+    # region parse parameters
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    # dataset args
     parser.add_argument("--datapath", required=False, default="dummydb",
                         help="path to the database. If nothing is give, generate"
                              "dummy database. The path must be relative to the "
@@ -543,50 +520,61 @@ def main():
     parser.add_argument("--subsamplerate", required=False, default=1, type=int,
                         help="how much to subsample the training set. A value v corresponds"
                              "to a subsampling of 1:v. Default: 1.")
-
-    parser.add_argument("--featureset", required=False, default="im",
-                        help="which feature set to use, for example im (interactive "
-                             "myocontrol), hudgins or"
-                             'a combination of features "hudgins rms".'
-                             'Default: "im".')
+    # features args
+    parser.add_argument("--featureset", required=False, default="raw",
+                        help='which feature set to use, for example raw, im (interactive '
+                             'myocontrol), hudgins or a combination of features '
+                             '"hudgins rms". '
+                             'Default: "raw".')
+    # transform x args
     parser.add_argument("--scalex", required=False, default="no",
-                        choices=["yes","no"],
+                        choices=["yes", "no"],
                         help="whether to normalize the emg or not (yes/no). Default: no.")
-
-    parser.add_argument("--transformx", required=True, default="none",
-                        choices=["none","rff","rbf"],
+    parser.add_argument("--transformx", required=False, default="none",
+                        choices=["none", "rff", "rbf"],
                         help="how to transform the Xs (none, rff, rbf). Default: none.")
     parser.add_argument("--numRFFseeds", required=False, default=1, type=int,
                         help="on how many seeds to average the RFFs, in case they were "
                              "used. Default: 1.")
-
-    parser.add_argument("--transformy", required=True, default="none",
-                        choices=["none","logit","arctanh"],
+    parser.add_argument("--window", required=False, default=1, type=int,
+                        help="dimension of sliding window. Default: 1.")
+    parser.add_argument("--stride", required=False, default=1, type=int,
+                        help="stride of the sliding window. Default: 1.")
+    # transform y args
+    parser.add_argument("--transformy", required=False, default="none",
+                        choices=["none", "logit", "arctanh"],
                         help="how to transform the Ys (none, logit, arctanh). "
                              "Default: none.")
-
+    # ml algo args
     parser.add_argument("--algo", required=True, default="rr",
-                        choices=["rr", "logr"],
-                        help="which regression algorithm to use (rr, logr). Default: rr.")
-
+                        choices=["rr", "logr", "cnn"],
+                        help="which regression algorithm to use (rr, logr, cnn). Default: rr.")
+    # hyp opt args
     parser.add_argument("--hypopt", required=False, default="no",
                         choices=["yes", "no"],
                         help="hyperparameter optimization (yes/no). Default: no.")
     parser.add_argument("--njobs", required=False, default=1, type=int,
                         help="number of jobs to use for cross validation. -1 to use all the "
                              "available jobs. Default: 1.")
-
+    # store args
     parser.add_argument("--saveoutput", required=False,
                         help="if needed, path where to save the output file. Ex: "
                              ".\\results\\")
     args = parser.parse_args()
+
+
+    # parse args
+    ALLOWED_FEATURES = ["raw", "im", "hudgins"]
 
     if not args.alltraintestsplits:
         train_reps = np.fromstring(args.trainreps, dtype=np.int, sep=" ")
         test_reps = np.fromstring(args.testreps, dtype=np.int, sep=" ")
     else:
         # combination of possible train-test reps
-        reps = (((1, 2, 3), (4)), ((1, 2, 4), (3)), ((1, 3, 4), (2)), ((2, 3, 4), (1)))
+        reps = (((1, 2, 3), (4)),
+                ((1, 2, 4), (3)),
+                ((1, 3, 4), (2)),
+                ((2, 3, 4), (1)))
 
     if args.hypopt == "yes":
         alphas_vec = np.logspace(-4, 4, 5)
@@ -598,8 +586,13 @@ def main():
         Cs_vec = [1.0]
 
     feature_set = str.split(args.featureset, " ")
-    allowed_features = ["im", "hudgins"]
-    assert all(item in allowed_features for item in feature_set), "invalid feature_set"
+
+    w_len = args.window
+    w_stride = args.stride
+
+    assert all(item in ALLOWED_FEATURES for item in feature_set), "invalid feature_set"
+    if "raw" in feature_set:
+        feature_set = ["raw"]
     if "im" in feature_set:
         feature_set = ["im"]
 
@@ -607,7 +600,12 @@ def main():
         targetTransform = None
 
     db_suffix = os.path.basename(args.datapath).split(".")[0].replace("_", "") + "_"
-    feature_suffix = "im" + "_" if "im" in feature_set else "".join(feature_set) + "_"
+    if "raw" in feature_set:
+        feature_suffix = "raw" + "_"
+    elif "im" in feature_set:
+        feature_suffix = "im" + "_"
+    else:
+        feature_suffix = "".join(feature_set) + "_"
     if args.transformx == "none":
         xtransform_suffix = "notransfx" + "_"
     scaling_suffix = "scaledx" + "_" if args.scalex == "yes" else "unscaledx" + "_"
@@ -624,83 +622,127 @@ def main():
         Path(out_dirname).mkdir(parents=True, exist_ok=True)
         sys.stdout = open(out_fname + "console.txt", "w")  # redirect console to file
 
-    ############################# load and process database #############################
+    # endregion
 
-    if args.datapath == "dummydb":
-        # generate dummy database
+    # region load and process data
+
+    # load data
+    if args.datapath == "dummydb":  # generate dummy database
         x_train, x_test, y_train, y_test, cv_splits = \
-            generate_mock_binary_clf_database(n_samples=1000, n_features=12)
-    else:
-        # load megane pro database
+            generate_mock_binary_clf_database(n_samples=10000, n_features=12)
+    else:  # load megane pro database
         fields = ["regrasp", "regrasprepetition", "reobject", "reposition", "redynamic",
                   "emg", "ts"]
         x_train, y_train, x_test, y_test, cv_splits = \
             load_megane_database(args.datapath, fields, train_reps, test_reps,
-                                 args.subsamplerate, feature_set)
+                                 args.subsamplerate, feature_set, w_len=1, w_stride=1)
 
-    ########################### Create tensor db and window it ##########################
+    x_val = x_train[cv_splits[0][1]]
+    y_val = y_train[cv_splits[0][1]]
+    x_train = x_train[cv_splits[0][0]]
+    y_train = y_train[cv_splits[0][0]]
 
-    # somehow...
+    # convert to tensorflow database
+    n_features = x_train.shape[1]
+    n_targets = y_train.shape[1]
 
-    dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+    args_window_fn = [x_train, y_train, w_len, w_stride]
+    db_train = tf.data.Dataset.from_generator(
+        generator=tf_util.create_sliding_window_generator,
+        output_types=(tf.float32, tf.float32),
+        output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
+        args=args_window_fn)
+    db_train_expanded = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
+    db_train_expanded_batched = db_train_expanded.batch(128)
 
-    # how the heck do I create images from windows in the dataset?
-    # maybe this can be helpful
-    # https://www.tensorflow.org/tutorials/structured_data/time_series#convolution_neural_network
+    args_window_fn = [x_val, y_val, w_len, w_stride]
+    db_val = tf.data.Dataset.from_generator(
+        generator=tf_util.create_sliding_window_generator,
+        output_types=(tf.float32, tf.float32),
+        output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
+        args=args_window_fn)
+    db_val_expanded = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
+    db_val_expanded_batched = db_val_expanded.batch(128)
+
+    args_window_fn = [x_test, y_test, w_len, w_stride]
+    db_test = tf.data.Dataset.from_generator(
+        generator=tf_util.create_sliding_window_generator,
+        output_types=(tf.float32, tf.float32),
+        output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
+        args=args_window_fn)
+    db_test_expanded = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
+    db_test_expanded_batched = db_test_expanded.batch(128)
 
 
-    #################################### CNN ##########################################
+    # endregion
 
+    # region CNN regression
 
-    myo_cnn_in = tf.keras.Input(shape=(40, 40, 1), name="in")
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
     x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn1")(myo_cnn_in)
     x = tf.keras.layers.BatchNormalization(name="bn1")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool1")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool1")(x)
+
     x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn2")(x)
     x = tf.keras.layers.BatchNormalization(name="bn2")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool2")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool2")(x)
+
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn3")(x)
     x = tf.keras.layers.BatchNormalization(name="bn3")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool3")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool3")(x)
+
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn4")(x)
     x = tf.keras.layers.BatchNormalization(name="bn4")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool4")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool4")(x)
+
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn5")(x)
     x = tf.keras.layers.BatchNormalization(name="bn5")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), name="pool5")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool5")(x)
+
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn6")(x)
     x = tf.keras.layers.BatchNormalization(name="bn6")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool6")(x)
+
     x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn7")(x)
     x = tf.keras.layers.BatchNormalization(name="bn7")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool7")(x)
+
     x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn8")(x)
     x = tf.keras.layers.BatchNormalization(name="bn8")(x)
-    x = tf.keras.layers.Dense(2, activation="relu", name="FC1")(x)
-    myo_cnn_out = tf.keras.layers.Dense(1, activation="linear", name="out")(x)
-    myo_cnn = tf.keras.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+
+    x = tf.keras.layers.Flatten(name="flatten")(x)
+    x = tf.keras.layers.Dense(6, activation="relu", name="FC1")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    myo_cnn = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
     myo_cnn.summary()
 
     myo_cnn.compile(
-        loss=tf.keras.losses.mean_squared_error(),
+        loss=tf.keras.losses.MeanSquaredError(),
         optimizer=tf.keras.optimizers.RMSprop(),
-        metrics=[tf.keras.metrics.mean_squared_error()],
+        metrics=[tf.keras.metrics.MeanAbsoluteError()],
     )
 
     history = myo_cnn.fit(
-        x_train,
-        y_train,
-        batch_size=128,
-        epochs=30,
-        # validation_data=(x_val, y_val),
+        x=db_train_expanded_batched,
+        epochs=5,
+        validation_data=db_val_expanded_batched,
     )
 
+    tf_util.plot_history(history, metrics=["mean_absolute_error"], plot_validation=True)
 
-    print("placeholder")
+    y_pred = myo_cnn.predict(db_test_expanded_batched)
+
+    # re-extract y_test from tf.Dataset because they were subsampled by the sliding window
+    y_test = tf_util.get_db_labels(db_test_expanded_batched)
+    test_mse = tf.reduce_mean(tf.keras.metrics.mean_absolute_error(y_test, y_pred)).numpy()
+    fig = quick_visualize_vec(y_test, y_pred, title="y_test vs y_true, MSE = "+str(test_mse))
+
+
+    # endregion
 
 
 if __name__ == "__main__":
     main()
-
-# example calls:
-# with meganepro database: python deepGraspRegression.py --datapath ..\data\S010_ex1.mat --subsamplerate 10 --featureset hudgins --useRFF True --scaledata True --numRFFseeds 5 --hypopt True --njobs -1 --saveoutput ..\results
-# with meganepro database: python deepGraspRegression.py --datapath ..\data\S010_ex1.mat --subsamplerate 20 --featureset raw --scaledata True --numRFFseeds 5 --hypopt True --njobs -1 --saveoutput ..\results
-# with dummy database: python deepGraspRegression.py --subsamplerate 1 --featureset raw --numRFFseeds 5 --hypopt True
