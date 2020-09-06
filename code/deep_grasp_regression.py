@@ -36,7 +36,7 @@ from sklearn.model_selection import KFold
 from scipy import signal
 import tensorflow as tf
 
-import myutils_tensorflow as tf_util
+import myutils_tensorflow as tf_utils
 
 
 # region functions hudgins features
@@ -114,7 +114,7 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
 # region functions megane pro
 
 
-def load_megane_database(fname, variable_names, train_reps, test_reps, subsamplerate,
+def load_megane_database(fname, variable_names, train_reps, test_reps, subsamplerate=1,
                          feature_set=[], w_len=400, w_stride=20):
     """ Load the desired fields (variable_names) from the megane pro database
     """
@@ -125,8 +125,10 @@ def load_megane_database(fname, variable_names, train_reps, test_reps, subsample
     data["emg"] = preprocess(data["emg"], feature_set=feature_set)
 
     # feature extraction
+    if "raw" in feature_set:  # do nothing
+        pass
     if "im" in feature_set:  # do nothing
-        placeholder = 1
+        pass
     if "hudgins" in feature_set:
         data["emg"] = extract_hudgins_features(data["emg"], w_dim=w_len, stride=w_stride)
         data["regrasp"] = subsample_data_window_based(
@@ -162,7 +164,7 @@ def preprocess(emg, feature_set=[]):
     * 2nd order butterworth band-pass filter with cut-off 10Hz
     """
 
-    if not feature_set:
+    if "im" in feature_set:
         emg = np.abs(emg)  # rectification
         sos = butter(2, 10, "lp", fs=1926, output="sos")
         emg = signal.sosfilt(sos, emg, axis=0)  # low-pass 10 Hz
@@ -328,7 +330,7 @@ def split_data(data, train_reps, test_reps, debug_plot=False, subsamplerate=1):
 
     # compute data splits for cross validation
     cv_splits = compute_cv_splits(data, idx_train, train_reps, debug_plot,
-                                  subsample_cv=True)
+                                  subsample_cv=(subsamplerate!=1))
 
     return x_train, y_train, x_test, y_test, cv_splits
 
@@ -648,7 +650,7 @@ def main():
 
     args_window_fn = [x_train, y_train, w_len, w_stride]
     db_train = tf.data.Dataset.from_generator(
-        generator=tf_util.create_sliding_window_generator,
+        generator=tf_utils.create_sliding_window_generator,
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
@@ -657,7 +659,7 @@ def main():
 
     args_window_fn = [x_val, y_val, w_len, w_stride]
     db_val = tf.data.Dataset.from_generator(
-        generator=tf_util.create_sliding_window_generator,
+        generator=tf_utils.create_sliding_window_generator,
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
@@ -666,7 +668,7 @@ def main():
 
     args_window_fn = [x_test, y_test, w_len, w_stride]
     db_test = tf.data.Dataset.from_generator(
-        generator=tf_util.create_sliding_window_generator,
+        generator=tf_utils.create_sliding_window_generator,
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
@@ -727,20 +729,20 @@ def main():
 
     history = myo_cnn.fit(
         x=db_train_expanded_batched,
-        epochs=5,
+        epochs=30,
         validation_data=db_val_expanded_batched,
     )
 
-    tf_util.plot_history(history, metrics=["mean_absolute_error"], plot_validation=True)
+    tf_utils.plot_history(history, metrics=["mean_absolute_error"], plot_validation=True)
 
     y_pred = myo_cnn.predict(db_test_expanded_batched)
 
     # re-extract y_test from tf.Dataset because they were subsampled by the sliding window
-    y_test = tf_util.get_db_labels(db_test_expanded_batched)
+    y_test = tf_utils.get_db_elems_labels(db_test_expanded_batched)
     test_mse = tf.reduce_mean(tf.keras.metrics.mean_absolute_error(y_test, y_pred)).numpy()
     fig = quick_visualize_vec(y_test, y_pred, title="y_test vs y_true, MSE = "+str(test_mse))
 
-
+    plt.plot()
     # endregion
 
 

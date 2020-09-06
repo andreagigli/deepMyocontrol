@@ -11,7 +11,14 @@ def create_sliding_window_generator(data, label, w_len, w_stride=1):
     of data and label. Data and label are numpy arrays, w is the length of the window.
 
     https://sknadig.dev/TensorFlow2.0-dataset/unfortunately for examples on how
-    to use tf.data.Dataset.from_generator()
+    to use tf.data.Dataset.from_generator().
+
+    Important note: although the generator stops correctly before producing
+    out-of-bound indices, when this function is used to generate databases
+    you will receive a "warning" from tensorflow "tensorflow/core/kernels/data/
+    generator_dataset_op.cc:103] Error occurred when finalizing GeneratorDataset
+    iterator: Cancelled: Operation was cancelled". This is harmless, and the
+    dataset will contain all the elements that one would expect in it.
     """
 
     n_windows = int((len(data) - w_len) / w_stride) + 1
@@ -28,24 +35,44 @@ def create_sliding_window_generator(data, label, w_len, w_stride=1):
 
 # region dataset info
 
-def get_db_labels(dataset):
-    """ Return the labels of a Tensorflow dataset as numpy array.
+
+def get_db_elems_labels(dataset):
+    """ Return elements and labels of a Tensorflow dataset as numpy arrays.
 
     It works both for un-batched and batched datasets.
-    If the dataset does not contain labels, then return an empty array.
+    If the dataset does not contain labels, returns only the elements.
     """
 
-    if len(dataset.as_numpy_iterator().next()) != 2:
+    if len(dataset.as_numpy_iterator().next()) < 2:
         labels = np.array([])
         warnings.warn("The dataset does not contain labels")
-    else:
         labels = []
         for _, y in dataset:  # only take first element of dataset
             labels.append(y.numpy())
         labels = np.vstack(labels)
+        return labels
 
-    return labels
+    if len(dataset.as_numpy_iterator().next()) == 2:
+        elems = []
+        labels = []
+        for x, y in dataset:  # only take first element of dataset
+            elems.append(x.numpy())
+            labels.append(y.numpy())
+        elems = np.vstack(elems)
+        labels = np.vstack(labels)
+        return elems, labels
 
+
+def get_unbatched_db_shape(dataset):
+    """ Computes the number of elements and their shape.
+    """
+
+    shape = dataset.as_numpy_iterator().next()[0].shape
+    num_el = 0
+    for _ in dataset.as_numpy_iterator():
+        num_el = num_el + 1
+
+    return num_el, shape
 
 # endregion
 
