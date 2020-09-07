@@ -15,9 +15,9 @@ DATASET_SIZE = 10000
 
 
 # using tensorboard to visualize the model's evolution in realtime instructions here
-# https://pythonprogramming.net/tensorboard-analysis-deep-learning-python-tensorflow
-# -keras/ (use callback to tensorflow in fit, run an instance of tensorflow indicating
-# the log folder, open the give url in the browser.)
+# https://pythonprogramming.net/tensorboard-analysis-deep-learning-python-tensorflow-keras/
+# (use callback to tensorflow in fit, run an instance of tensorflow from anaconda
+# tensorboard --logdir = log_dir_path, open the given url in the browser.)
 tensorboard = TensorBoard(log_dir="logs\\{}".format(NAME))
 
 # create data

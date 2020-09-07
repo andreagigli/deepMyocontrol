@@ -35,8 +35,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
 from scipy import signal
 import tensorflow as tf
+from tensorflow.keras.callbacks import TensorBoard
+import time
 
 import myutils_tensorflow as tf_utils
+
+
+TENSORFLOWDIRNAME = "toy_windowing_CNN_{}".format(int(time.time()))
 
 
 # region functions hudgins features
@@ -678,7 +683,18 @@ def main():
 
     # endregion
 
+
+    # region MLP
+
+    
+
+    # endregion
+
+
     # region CNN regression
+
+    # define tensorboard callback
+    tensorboard = TensorBoard(log_dir="logs\\{}".format(TENSORFLOWDIRNAME))
 
     # define model
     myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
@@ -729,8 +745,9 @@ def main():
 
     history = myo_cnn.fit(
         x=db_train_expanded_batched,
-        epochs=30,
+        epochs=50,
         validation_data=db_val_expanded_batched,
+        callbacks=[tensorboard]
     )
 
     tf_utils.plot_history(history, metrics=["mean_absolute_error"], plot_validation=True)
