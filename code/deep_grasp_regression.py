@@ -730,7 +730,8 @@ def main():
     db_train = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_train = db_train.shuffle(buffer_size=shuffle_buffer_size, seed=1)
-    db_train = db_train.batch(batch_size).repeat()
+    # num_complete_batches_train = tf_utils.get_unbatched_db_shape(db_train)[0] // batch_size
+    db_train = db_train.batch(batch_size)
 
     args_window_fn = [x_val, y_val, w_len, w_stride]
     db_val = tf.data.Dataset.from_generator(
@@ -738,9 +739,11 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
+    db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_val = db_val.shuffle(buffer_size=shuffle_buffer_size, seed=1)
+    # num_complete_batches_val = tf_utils.get_unbatched_db_shape(db_val)[0] // batch_size
+    db_val = db_val.batch(batch_size)
 
     args_window_fn = [x_test, y_test, w_len, w_stride]
     db_test = tf.data.Dataset.from_generator(
@@ -748,10 +751,10 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
+    db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_test = db_test.shuffle(buffer_size=shuffle_buffer_size, seed=1)
-
+    db_test = db_test.batch(batch_size)
 
     # endregion
 
@@ -822,7 +825,9 @@ def main():
     history = myo_cnn.fit(
         x=db_train,
         epochs=50,
-        validation_data=db_train,
+        validation_data=db_val,
+        # steps_per_epoch=num_complete_batches_train,  # just added to avoid the warning BaseCollectiveExecutor::StartAbort Out of range: End of sequence, workaround from https://github.com/tensorflow/tensorflow/issues/32817
+        # validation_steps=num_complete_batches_val,
         callbacks=[tensorboard]  # tensorboard callback
     )
 
