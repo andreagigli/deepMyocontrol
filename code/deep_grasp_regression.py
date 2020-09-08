@@ -123,7 +123,7 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
 
 
 def load_megane_database(fname, variable_names, train_reps, test_reps, subsamplerate=1,
-                         feature_set=[], w_len=400, w_stride=20):
+                         feature_set=[], w_len=1, w_stride=1):
     """ Load the desired fields (variable_names) from the megane pro database
     """
 
@@ -513,6 +513,9 @@ def quick_visualize_vec(data, overlay_data=None, title="", continue_on_fig=None,
 # from https://stackoverflow.com/questions/42158694/how-to-run
 # -tensorboard-from-python-scipt-in-virtualenv#:~:text=To%20run%20tensorboard%20from%20a,
 # thread%20as%20suggested%20by%20%40Dmitry.
+#
+# NOTE: it needs some moments before the chrome page is correctly displayed.
+# just update the page after a short while.
 
 
 class TensorboardSupervisor:
@@ -705,7 +708,7 @@ def main():
                   "emg", "ts"]
         x_train, y_train, x_test, y_test, cv_splits = \
             load_megane_database(args.datapath, fields, train_reps, test_reps,
-                                 args.subsamplerate, feature_set, w_len=1, w_stride=1)
+                                 args.subsamplerate, feature_set)
 
     x_val = x_train[cv_splits[0][1]]
     y_val = y_train[cv_splits[0][1]]
@@ -715,6 +718,8 @@ def main():
     # convert to tensorflow database
     n_features = x_train.shape[1]
     n_targets = y_train.shape[1]
+    batch_size = 128
+    shuffle_buffer_size = 1000
 
     args_window_fn = [x_train, y_train, w_len, w_stride]  # arguments of the generator fn
     db_train = tf.data.Dataset.from_generator(
@@ -724,8 +729,8 @@ def main():
         args=args_window_fn)
     db_train = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
-        db_train = db_train.shuffle(buffer_size=1000, seed=1)
-    db_train = db_train.batch(128)
+        db_train = db_train.shuffle(buffer_size=shuffle_buffer_size, seed=1)
+    db_train = db_train.batch(batch_size).repeat()
 
     args_window_fn = [x_val, y_val, w_len, w_stride]
     db_val = tf.data.Dataset.from_generator(
@@ -735,8 +740,7 @@ def main():
         args=args_window_fn)
     db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
     if args.shuffle:
-        db_val = db_val.shuffle(buffer_size=200, seed=1)
-    db_val = db_val.batch(128)
+        db_val = db_val.shuffle(buffer_size=shuffle_buffer_size, seed=1)
 
     args_window_fn = [x_test, y_test, w_len, w_stride]
     db_test = tf.data.Dataset.from_generator(
@@ -746,8 +750,7 @@ def main():
         args=args_window_fn)
     db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
     if args.shuffle:
-        db_test = db_test.shuffle(buffer_size=200, seed=1)
-    db_test = db_test.batch(128)
+        db_test = db_test.shuffle(buffer_size=shuffle_buffer_size, seed=1)
 
 
     # endregion
@@ -764,8 +767,10 @@ def main():
     if USING_TENSORBOARD:
         TENSORBOARDDIRNAME = "toy_windowing_CNN_{}".format(int(time.time()))
         TENSORBOARDLOGDIRNAME = ".\\logs"
-        tensorboard = TensorBoard(os.path.join(TENSORBOARDLOGDIRNAME, TENSORBOARDDIRNAME))
         tb_sup = TensorboardSupervisor(os.path.join(TENSORBOARDLOGDIRNAME, TENSORBOARDDIRNAME))  # run tensorboard server
+        tensorboard = TensorBoard(os.path.join(TENSORBOARDLOGDIRNAME, TENSORBOARDDIRNAME),
+                                  update_freq="epoch",
+                                  profile_batch=0)  # define callback (client)
 
     # define model
     myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
@@ -815,18 +820,18 @@ def main():
     )
 
     history = myo_cnn.fit(
-        x=db_train_expanded_batched,
+        x=db_train,
         epochs=50,
-        validation_data=db_val_expanded_batched,
+        validation_data=db_train,
         callbacks=[tensorboard]  # tensorboard callback
     )
 
     tf_utils.plot_history(history, metrics=["mean_absolute_error"], plot_validation=True)
 
-    y_pred = myo_cnn.predict(db_test_expanded_batched)
+    y_pred = myo_cnn.predict(db_test)
 
     # re-extract y_test from tf.Dataset because they were subsampled by the sliding window
-    y_test = tf_utils.get_db_elems_labels(db_test_expanded_batched)
+    y_test = tf_utils.get_db_elems_labels(db_test)
     test_mse = tf.reduce_mean(tf.keras.metrics.mean_absolute_error(y_test, y_pred)).numpy()
     fig = quick_visualize_vec(y_test, y_pred, title="y_test vs y_true, MSE = "+str(test_mse))
 

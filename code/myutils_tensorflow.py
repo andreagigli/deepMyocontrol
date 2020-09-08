@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import warnings
 
+
 # region dataset manipulation
 
 def create_sliding_window_generator(data, label, w_len, w_stride=1):
