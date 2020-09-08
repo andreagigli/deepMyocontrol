@@ -860,7 +860,7 @@ def main():
     history = myo_cnn.fit(
         x=db_train,
         epochs=50,
-        validation_data=db_train,
+        validation_data=db_val,
         steps_per_epoch = steps_per_training_epoch,
         callbacks=[tensorboard]  # tensorboard callback
     )
