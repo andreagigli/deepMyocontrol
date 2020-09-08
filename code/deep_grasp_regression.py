@@ -11,10 +11,10 @@ EMG control." Journal of neural engineering 16.3 (2019): 036015.
 example call:
 python deepGraspRegression.py
 --datapath ..\data\S010_ex1.mat
---scalex no
 --algo cnn
 --window 400
 --stride 20
+--shuffle True
 """
 
 import argparse
@@ -589,6 +589,8 @@ def main():
     parser.add_argument("--subsamplerate", required=False, default=1, type=int,
                         help="how much to subsample the training set. A value v corresponds"
                              "to a subsampling of 1:v. Default: 1.")
+    parser.add_argument("--shuffle", required=False, default=False, type=bool,
+                        help="whether to shuffle the data or not. Default: False.")
     # features args
     parser.add_argument("--featureset", required=False, default="raw",
                         help='which feature set to use, for example raw, im (interactive '
@@ -596,9 +598,8 @@ def main():
                              '"hudgins rms". '
                              'Default: "raw".')
     # transform x args
-    parser.add_argument("--scalex", required=False, default="no",
-                        choices=["yes", "no"],
-                        help="whether to normalize the emg or not (yes/no). Default: no.")
+    parser.add_argument("--scalex", required=False, default=False, type=bool,
+                        help="whether to normalize the emg or not. Default: False.")
     parser.add_argument("--transformx", required=False, default="none",
                         choices=["none", "rff", "rbf"],
                         help="how to transform the Xs (none, rff, rbf). Default: none.")
@@ -677,7 +678,7 @@ def main():
         feature_suffix = "".join(feature_set) + "_"
     if args.transformx == "none":
         xtransform_suffix = "notransfx" + "_"
-    scaling_suffix = "scaledx" + "_" if args.scalex == "yes" else "unscaledx" + "_"
+    scaling_suffix = "scaledx" + "_" if args.scalex else "unscaledx" + "_"
     if args.transformy == "none":
         ytransform_suffix = "notransfy" + "_"
     hypopt_suffix = "ho_" if args.hypopt == "yes" else "nho_"
@@ -715,15 +716,16 @@ def main():
     n_features = x_train.shape[1]
     n_targets = y_train.shape[1]
 
-    args_window_fn = [x_train, y_train, w_len, w_stride]
+    args_window_fn = [x_train, y_train, w_len, w_stride]  # arguments of the generator fn
     db_train = tf.data.Dataset.from_generator(
         generator=tf_utils.create_sliding_window_generator,
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_train_expanded = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=200, seed=1)
-
-    db_train_expanded_batched = db_train_expanded.batch(128)
+    db_train = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
+    if args.shuffle:
+        db_train = db_train.shuffle(buffer_size=1000, seed=1)
+    db_train = db_train.batch(128)
 
     args_window_fn = [x_val, y_val, w_len, w_stride]
     db_val = tf.data.Dataset.from_generator(
@@ -731,8 +733,10 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_val_expanded = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=200, seed=1)
-    db_val_expanded_batched = db_val_expanded.batch(128)
+    db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
+    if args.shuffle:
+        db_val = db_val.shuffle(buffer_size=200, seed=1)
+    db_val = db_val.batch(128)
 
     args_window_fn = [x_test, y_test, w_len, w_stride]
     db_test = tf.data.Dataset.from_generator(
@@ -740,8 +744,10 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_test_expanded = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=200, seed=1)
-    db_test_expanded_batched = db_test_expanded.batch(128)
+    db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
+    if args.shuffle:
+        db_test = db_test.shuffle(buffer_size=200, seed=1)
+    db_test = db_test.batch(128)
 
 
     # endregion
