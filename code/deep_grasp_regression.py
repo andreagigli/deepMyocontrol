@@ -129,6 +129,14 @@ def load_megane_database(fname, variable_names, train_reps, test_reps, subsample
 
     data = loadmat(fname, variable_names=variable_names[:])
 
+    # for debug, just make the dataset smaller
+    data["emg"] = data["emg"][:1000000,:]
+    data["regrasp"] = data["regrasp"][:1000000, :]
+    data["regrasprepetition"] = data["regrasprepetition"][:1000000, :]
+    data["reobject"] = data["reobject"][:1000000, :]
+    data["reposition"] = data["reposition"][:1000000, :]
+    data["redynamic"] = data["redynamic"][:1000000, :]
+
     # preprocessing
     data["emg"] = preprocess(data["emg"], feature_set=feature_set)
 
@@ -727,10 +735,38 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
+
+    # debug
+    print("num_samples_original = " + str(x_train.shape))
+    expected_num_complete_windows = int((x_train.shape[0] - w_len) / w_stride) + 1
+    print("w_len = " + str(w_len) + ", w_stride = " + str(w_stride))
+    print("expected_num_el_dataset (= num_windows, last incomplete window discarded from db!) = " + str(expected_num_complete_windows))
+    num_elements = tf_utils.get_unbatched_db_shape(db_train)[0]  # number of el dataset (= num of windows)
+    print("real_num_el_dataset = " + str(num_elements))
+    for last_item_of_unbatched_dataset in db_train.as_numpy_iterator():
+        pass
+    print("first element of the unbatched dataset = " + str(next(db_train.as_numpy_iterator())[0]))
+    print("last element of the unbatched dataset = " + str(last_item_of_unbatched_dataset[0]))
+
     db_train = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
-    if args.shuffle:
-        db_train = db_train.shuffle(buffer_size=shuffle_buffer_size, seed=1)
-    db_train = db_train.batch(batch_size).repeat()
+    # if args.shuffle:
+    #     db_train = db_train.shuffle(buffer_size=shuffle_buffer_size, seed=1)
+    db_train = db_train.batch(batch_size)
+
+    # debug
+    print("batch size = " + str(batch_size))
+    print("expected_num_full_batches = " + str(num_elements // batch_size))
+    print("shape_first_batch = " + str(next(db_train.as_numpy_iterator())[0].shape))
+    print("real_num_batches = " + str(tf_utils.get_unbatched_db_shape(db_train)[0]))
+    for last_item_of_last_batch in db_train.as_numpy_iterator():
+        pass
+    print("shape_last_batch (the last batch will be discarded by the fit method) = " + str(last_item_of_last_batch[0].shape))
+    print("first element of the first batch = " + str(next(db_train.as_numpy_iterator())[0][0][:, :, 0]))
+    print("last element of the last batch = " + str(last_item_of_last_batch[0][-1][:,:,0]))
+
+    input("Press Enter to continue...")
+    return
+
 
     args_window_fn = [x_val, y_val, w_len, w_stride]
     db_val = tf.data.Dataset.from_generator(
@@ -741,6 +777,7 @@ def main():
     db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
     if args.shuffle:
         db_val = db_val.shuffle(buffer_size=shuffle_buffer_size, seed=1)
+    db_val = db_val.batch(batch_size)
 
     args_window_fn = [x_test, y_test, w_len, w_stride]
     db_test = tf.data.Dataset.from_generator(
@@ -751,6 +788,7 @@ def main():
     db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
     if args.shuffle:
         db_test = db_test.shuffle(buffer_size=shuffle_buffer_size, seed=1)
+    db_test = db_test.batch(batch_size)
 
 
     # endregion
@@ -823,6 +861,7 @@ def main():
         x=db_train,
         epochs=50,
         validation_data=db_train,
+        steps_per_epoch = steps_per_training_epoch,
         callbacks=[tensorboard]  # tensorboard callback
     )
 
