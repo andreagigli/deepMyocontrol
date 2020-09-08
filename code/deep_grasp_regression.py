@@ -774,7 +774,7 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
+    db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_val = db_val.shuffle(buffer_size=shuffle_buffer_size, seed=1)
     db_val = db_val.batch(batch_size)
@@ -785,7 +785,7 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=1000, seed=1)
+    db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_test = db_test.shuffle(buffer_size=shuffle_buffer_size, seed=1)
     db_test = db_test.batch(batch_size)
