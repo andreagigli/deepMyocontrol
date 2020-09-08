@@ -35,13 +35,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
 from scipy import signal
 import tensorflow as tf
-from tensorflow.keras.callbacks import TensorBoard
+from multiprocessing import Process
 import time
+try:
+    from tensorflow.keras.callbacks import TensorBoard
+    print("using tensorboard")
+    USING_TENSORBOARD = True
+except ImportError:
+    USING_TENSORBOARD = False
 
 import myutils_tensorflow as tf_utils
-
-
-TENSORFLOWDIRNAME = "toy_windowing_CNN_{}".format(int(time.time()))
 
 
 # region functions hudgins features
@@ -505,6 +508,65 @@ def quick_visualize_vec(data, overlay_data=None, title="", continue_on_fig=None,
 # endregion
 
 
+# region tensorboard functions
+
+# from https://stackoverflow.com/questions/42158694/how-to-run
+# -tensorboard-from-python-scipt-in-virtualenv#:~:text=To%20run%20tensorboard%20from%20a,
+# thread%20as%20suggested%20by%20%40Dmitry.
+
+
+class TensorboardSupervisor:
+    def __init__(self, log_dp):
+        self.server = TensorboardServer(log_dp)
+        self.server.start()
+        print("Started Tensorboard Server")
+        self.chrome = ChromeProcess()
+        print("Started Chrome Browser")
+        self.chrome.start()
+
+    def finalize(self):
+        if self.server.is_alive():
+            print('Killing Tensorboard Server')
+            self.server.terminate()
+            self.server.join()
+        # As a preference, we leave chrome open - but this may be amended similar to the method above
+
+
+class TensorboardServer(Process):
+    def __init__(self, log_dp):
+        super().__init__()
+        self.os_name = os.name
+        self.log_dp = str(log_dp)
+        # self.daemon = True
+
+    def run(self):
+        if self.os_name == 'nt':  # Windows
+            os.system(f'{sys.executable} -m tensorboard.main --logdir "{self.log_dp}" 2> NUL')
+        elif self.os_name == 'posix':  # Linux
+            os.system(f'{sys.executable} -m tensorboard.main --logdir "{self.log_dp}" '
+                      f'--host `hostname -I` >/dev/null 2>&1')
+        else:
+            raise NotImplementedError(f'No support for OS : {self.os_name}')
+
+
+class ChromeProcess(Process):
+    def __init__(self):
+        super().__init__()
+        self.os_name = os.name
+        self.daemon = True
+
+    def run(self):
+        if self.os_name == 'nt':  # Windows
+            os.system(f'start chrome  http://localhost:6006/')
+        elif self.os_name == 'posix':  # Linux
+            os.system(f'google-chrome http://localhost:6006/')
+        else:
+            raise NotImplementedError(f'No support for OS : {self.os_name}')
+
+
+# endregion
+
+
 def main():
 
     # region parse parameters
@@ -659,7 +721,8 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_train_expanded = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
+    db_train_expanded = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=200, seed=1)
+
     db_train_expanded_batched = db_train_expanded.batch(128)
 
     args_window_fn = [x_val, y_val, w_len, w_stride]
@@ -668,7 +731,7 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_val_expanded = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
+    db_val_expanded = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=200, seed=1)
     db_val_expanded_batched = db_val_expanded.batch(128)
 
     args_window_fn = [x_test, y_test, w_len, w_stride]
@@ -677,24 +740,26 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    db_test_expanded = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
+    db_test_expanded = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y)).shuffle(buffer_size=200, seed=1)
     db_test_expanded_batched = db_test_expanded.batch(128)
 
 
     # endregion
 
-
     # region MLP
 
-    
+
 
     # endregion
 
-
     # region CNN regression
 
-    # define tensorboard callback
-    tensorboard = TensorBoard(log_dir="logs\\{}".format(TENSORFLOWDIRNAME))
+    # define tensorboard callback and run tensorboard server
+    if USING_TENSORBOARD:
+        TENSORBOARDDIRNAME = "toy_windowing_CNN_{}".format(int(time.time()))
+        TENSORBOARDLOGDIRNAME = ".\\logs"
+        tensorboard = TensorBoard(os.path.join(TENSORBOARDLOGDIRNAME, TENSORBOARDDIRNAME))
+        tb_sup = TensorboardSupervisor(os.path.join(TENSORBOARDLOGDIRNAME, TENSORBOARDDIRNAME))  # run tensorboard server
 
     # define model
     myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
@@ -747,7 +812,7 @@ def main():
         x=db_train_expanded_batched,
         epochs=50,
         validation_data=db_val_expanded_batched,
-        callbacks=[tensorboard]
+        callbacks=[tensorboard]  # tensorboard callback
     )
 
     tf_utils.plot_history(history, metrics=["mean_absolute_error"], plot_validation=True)
@@ -760,6 +825,10 @@ def main():
     fig = quick_visualize_vec(y_test, y_pred, title="y_test vs y_true, MSE = "+str(test_mse))
 
     plt.plot()
+
+    if USING_TENSORBOARD:
+        tb_sup.finalize()  # close tensorboard server
+
     # endregion
 
 
