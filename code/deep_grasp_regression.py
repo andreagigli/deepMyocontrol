@@ -9,12 +9,7 @@ Ameri, Ali, et al. "Regression convolutional neural network for improved simulta
 EMG control." Journal of neural engineering 16.3 (2019): 036015.
 
 example call:
-python deepGraspRegression.py
---datapath ..\data\S010_ex1.mat
---algo cnn
---window 400
---stride 20
---shuffle True
+python deep_grasp_regression.py --datapath ..\data\S010_ex1.mat --algo cnn --nepochs 20 --window 400 --stride 20 --shuffle True --saveoutput ..\results
 """
 
 import argparse
@@ -37,8 +32,10 @@ from scipy import signal
 import tensorflow as tf
 from multiprocessing import Process
 import time
+
 try:
     from tensorflow.keras.callbacks import TensorBoard
+
     print("using tensorboard")
     USING_TENSORBOARD = True
 except ImportError:
@@ -338,7 +335,7 @@ def split_data(data, train_reps, test_reps, debug_plot=False, subsamplerate=1):
 
     # compute data splits for cross validation
     cv_splits = compute_cv_splits(data, idx_train, train_reps, debug_plot,
-                                  subsample_cv=(subsamplerate!=1))
+                                  subsample_cv=(subsamplerate != 1))
 
     return x_train, y_train, x_test, y_test, cv_splits
 
@@ -494,14 +491,35 @@ def quick_visualize_vec(data, overlay_data=None, title="", continue_on_fig=None,
             ax1 = fig.add_subplot(n_subplot_rows, n_subplot_cols, i)
             ax1.plot(data[:, i - 1]) if x_axis is None else ax1.plot(x_axis, data[:, i - 1])
             if overlay_data is not None:
-                ax1.plot(overlay_data[:, i - 1]) if x_axis is None else ax1.plot(x_axis, overlay_data[:, i - 1])
+                ax1.plot(overlay_data[:, i - 1]) if x_axis is None else ax1.plot(x_axis,
+                                                                                 overlay_data[
+                                                                                 :, i - 1])
     else:
         fig = continue_on_fig
         for i in range(data.shape[1]):
-            fig.axes[i].plot(data[:, i]) if x_axis is None else fig.axes[i].plot(x_axis, data[:, i])
+            fig.axes[i].plot(data[:, i]) if x_axis is None else fig.axes[i].plot(x_axis,
+                                                                                 data[:, i])
             if overlay_data is not None:
-                fig.axes[i].plot(overlay_data[:, i]) if x_axis is None else fig.axes[i].plot(x_axis, overlay_data[:, i])
+                fig.axes[i].plot(overlay_data[:, i]) if x_axis is None else fig.axes[i].plot(
+                    x_axis, overlay_data[:, i])
     plt.suptitle(title)
+    return fig
+
+
+def quick_visualize_img_tf_db_unbatched(dataset, num_images=5):
+    """
+
+    """
+
+    gen = dataset.as_numpy_iterator()
+
+    num_cols = 5
+    num_rows = ((num_images - 1) // num_cols) + 1
+    fig = plt.figure(figsize=figaspect(0.5))
+    for i in range(num_images):
+        ax1 = fig.add_subplot(num_rows, num_cols, i + 1)
+        plt.imshow(next(gen)[0], aspect="auto")
+
     return fig
 
 
@@ -570,8 +588,65 @@ class ChromeProcess(Process):
 # endregion
 
 
-def main():
+# region tensorflow functions
 
+def compile_fit(model, db_train, db_val, num_epochs=20,
+                plot_history=False,
+                model_name=None,
+                results_dir=None,
+                use_tensorboard=False):
+    """
+    model_name: just a name to identify the model,
+    results_dir: dir name where to save the model or None,
+    use_tensorboard: Boolean
+    """
+
+    if results_dir:
+        assert model_name, "Please provide a name for the model you want to save."
+        out_dir_name = os.path.join(results_dir, f"{model_name}_{int(time.time())}")
+        os.makedirs(out_dir_name, exist_ok=True)
+
+    # define tensorboard callback and run tensorboard server
+    if use_tensorboard:
+        assert results_dir, "To use tensorboard, please specify and output directory."
+        tb_sup = TensorboardSupervisor(out_dir_name)  # run tensorboard server
+        tensorboard = TensorBoard(out_dir_name,
+                                  update_freq="epoch",
+                                  profile_batch=0)  # define callback for client
+        callbacks = [tensorboard]
+    else:
+        callbacks = None
+
+    model.compile(
+        loss=tf.keras.losses.MeanSquaredError(),
+        optimizer=tf.keras.optimizers.RMSprop(),
+        metrics=[tf.keras.metrics.MeanAbsoluteError()],
+    )
+
+    history = model.fit(
+        x=db_train,
+        epochs=num_epochs,
+        validation_data=db_val,
+        callbacks=callbacks  # tensorboard callback
+    )
+
+    if plot_history:
+        tf_utils.plot_history(history, metrics=["mean_absolute_error"], plot_validation=True)
+
+    if use_tensorboard:
+        tb_sup.finalize()  # close tensorboard server
+
+    if results_dir:
+        model.save(f'{out_dir_name}')
+        # debug: reload model with model = tf.keras.models.load_model(f'{out_dir_name}\\{model_name}')
+
+    return model
+
+
+# endregion
+
+
+def main():
     # region parse parameters
 
     parser = argparse.ArgumentParser(
@@ -626,15 +701,16 @@ def main():
     parser.add_argument("--hypopt", required=False, default="no",
                         choices=["yes", "no"],
                         help="hyperparameter optimization (yes/no). Default: no.")
+    parser.add_argument("--nepochs", required=False, default=5, type=int,
+                        help="number of epochs. Default: 5.")
     parser.add_argument("--njobs", required=False, default=1, type=int,
                         help="number of jobs to use for cross validation. -1 to use all the "
                              "available jobs. Default: 1.")
     # store args
-    parser.add_argument("--saveoutput", required=False,
+    parser.add_argument("--saveoutput", required=False, default=None,
                         help="if needed, path where to save the output file. Ex: "
                              ".\\results\\")
     args = parser.parse_args()
-
 
     # parse args
     ALLOWED_FEATURES = ["raw", "im", "hudgins"]
@@ -649,14 +725,14 @@ def main():
                 ((1, 3, 4), (2)),
                 ((2, 3, 4), (1)))
 
-    if args.hypopt == "yes":
-        alphas_vec = np.logspace(-4, 4, 5)
-        gammas_vec = np.logspace(-4, 4, 5)
-        Cs_vec = np.logspace(-4, 4, 5)
-    else:
-        alphas_vec = [1.0]
-        gammas_vec = [0.5]
-        Cs_vec = [1.0]
+    # if args.hypopt == "yes":
+    #     alphas_vec = np.logspace(-4, 4, 5)
+    #     gammas_vec = np.logspace(-4, 4, 5)
+    #     Cs_vec = np.logspace(-4, 4, 5)
+    # else:
+    #     alphas_vec = [1.0]
+    #     gammas_vec = [0.5]
+    #     Cs_vec = [1.0]
 
     feature_set = str.split(args.featureset, " ")
 
@@ -669,31 +745,35 @@ def main():
     if "im" in feature_set:
         feature_set = ["im"]
 
-    if args.transformy == "none":
-        targetTransform = None
+    # if args.transformy == "none":
+    #     targetTransform = None
 
-    db_suffix = os.path.basename(args.datapath).split(".")[0].replace("_", "") + "_"
-    if "raw" in feature_set:
-        feature_suffix = "raw" + "_"
-    elif "im" in feature_set:
-        feature_suffix = "im" + "_"
-    else:
-        feature_suffix = "".join(feature_set) + "_"
-    if args.transformx == "none":
-        xtransform_suffix = "notransfx" + "_"
-    scaling_suffix = "scaledx" + "_" if args.scalex else "unscaledx" + "_"
-    if args.transformy == "none":
-        ytransform_suffix = "notransfy" + "_"
-    hypopt_suffix = "ho_" if args.hypopt == "yes" else "nho_"
-    algo_suffix = args.algo + "_"
+    # db_suffix = os.path.basename(args.datapath).split(".")[0].replace("_", "") + "_"
+    # if "raw" in feature_set:
+    #     feature_suffix = "raw" + "_"
+    # elif "im" in feature_set:
+    #     feature_suffix = "im" + "_"
+    # else:
+    #     feature_suffix = "".join(feature_set) + "_"
+    # if args.transformx == "none":
+    #     xtransform_suffix = "notransfx" + "_"
+    # scaling_suffix = "scaledx" + "_" if args.scalex else "unscaledx" + "_"
+    # if args.transformy == "none":
+    #     ytransform_suffix = "notransfy" + "_"
+    # hypopt_suffix = "ho_" if args.hypopt == "yes" else "nho_"
+    # algo_suffix = args.algo + "_"
 
-    if args.saveoutput:
-        out_dirname = os.path.join(args.saveoutput, db_suffix.replace("_", "")) + "\\"
-        out_fname = out_dirname + \
-                    feature_suffix + scaling_suffix + xtransform_suffix + \
-                    ytransform_suffix + hypopt_suffix + algo_suffix
-        Path(out_dirname).mkdir(parents=True, exist_ok=True)
-        sys.stdout = open(out_fname + "console.txt", "w")  # redirect console to file
+    use_tensorboard = USING_TENSORBOARD
+    num_epochs = args.nepochs
+    results_dir = args.saveoutput
+
+    # if args.saveoutput:
+    #     out_dirname = os.path.join(args.saveoutput, db_suffix.replace("_", "")) + "\\"
+    #     out_fname = out_dirname + \
+    #                 feature_suffix + scaling_suffix + xtransform_suffix + \
+    #                 ytransform_suffix + hypopt_suffix + algo_suffix
+    #     Path(out_dirname).mkdir(parents=True, exist_ok=True)
+    #     sys.stdout = open(out_fname + "console.txt", "w")  # redirect console to file
 
     # endregion
 
@@ -727,6 +807,7 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
+    # quick_visualize_img_tf_db_unbatched(db_train, num_images=10)  # for debug
     db_train = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_train = db_train.shuffle(buffer_size=shuffle_buffer_size, seed=1)
@@ -739,6 +820,7 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
+    quick_visualize_img_tf_db_unbatched(db_val, num_images=10)  # for debug
     db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_val = db_val.shuffle(buffer_size=shuffle_buffer_size, seed=1)
@@ -751,6 +833,7 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
+    quick_visualize_img_tf_db_unbatched(db_test, num_images=10)  # for debug
     db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_test = db_test.shuffle(buffer_size=shuffle_buffer_size, seed=1)
@@ -758,53 +841,64 @@ def main():
 
     # endregion
 
+
     # region MLP
-
-
 
     # endregion
 
-    # region CNN regression
+
+    # region CNN regression (inspired by VGG16, built incrementally)
+
+    # TODO: add complexity (rectangular kernels, squared kernels with larger
+    #  stride in one dimension, dilated kernels, rectangular max pooling,
+    #  valid convolution, deeper layers until you overfit) until you overfit.
+    #  Then add batch normalization, dropout, weight regularization.
+
+    # guidelines for building the model incrementally here
+    # https://towardsdatascience.com/a-guide-to-an-efficient-way-to-build-neural-network-architectures-part-ii-hyper-parameter-42efca01e5d7
 
     # define tensorboard callback and run tensorboard server
-    if USING_TENSORBOARD:
-        TENSORBOARDDIRNAME = "toy_windowing_CNN_{}".format(int(time.time()))
-        TENSORBOARDLOGDIRNAME = ".\\logs"
-        tb_sup = TensorboardSupervisor(os.path.join(TENSORBOARDLOGDIRNAME, TENSORBOARDDIRNAME))  # run tensorboard server
-        tensorboard = TensorBoard(os.path.join(TENSORBOARDLOGDIRNAME, TENSORBOARDDIRNAME),
-                                  update_freq="epoch",
-                                  profile_batch=0)  # define callback (client)
+
+    # region arch_0 CNN ameri
 
     # define model
     myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
 
-    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn1")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn1")(
+        myo_cnn_in)
     x = tf.keras.layers.BatchNormalization(name="bn1")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool1")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same",
+                                         name="pool1")(x)
 
     x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn2")(x)
     x = tf.keras.layers.BatchNormalization(name="bn2")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool2")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same",
+                                         name="pool2")(x)
 
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn3")(x)
     x = tf.keras.layers.BatchNormalization(name="bn3")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool3")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same",
+                                         name="pool3")(x)
 
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn4")(x)
     x = tf.keras.layers.BatchNormalization(name="bn4")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool4")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same",
+                                         name="pool4")(x)
 
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn5")(x)
     x = tf.keras.layers.BatchNormalization(name="bn5")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool5")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same",
+                                         name="pool5")(x)
 
     x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same", name="cnn6")(x)
     x = tf.keras.layers.BatchNormalization(name="bn6")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool6")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same",
+                                         name="pool6")(x)
 
     x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn7")(x)
     x = tf.keras.layers.BatchNormalization(name="bn7")(x)
-    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same", name="pool7")(x)
+    x = tf.keras.layers.AveragePooling2D(pool_size=(2, 2), strides=(2, 2), padding="same",
+                                         name="pool7")(x)
 
     x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same", name="cnn8")(x)
     x = tf.keras.layers.BatchNormalization(name="bn8")(x)
@@ -813,38 +907,165 @@ def main():
     x = tf.keras.layers.Dense(6, activation="relu", name="FC1")(x)
     myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
 
-    myo_cnn = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
-    myo_cnn.summary()
+    arch_ameri = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_ameri.summary()
 
-    myo_cnn.compile(
-        loss=tf.keras.losses.MeanSquaredError(),
-        optimizer=tf.keras.optimizers.RMSprop(),
-        metrics=[tf.keras.metrics.MeanAbsoluteError()],
-    )
+    # endregion
 
-    history = myo_cnn.fit(
-        x=db_train,
-        epochs=50,
-        validation_data=db_val,
-        # steps_per_epoch=num_complete_batches_train,  # just added to avoid the warning BaseCollectiveExecutor::StartAbort Out of range: End of sequence, workaround from https://github.com/tensorflow/tensorflow/issues/32817
-        # validation_steps=num_complete_batches_val,
-        callbacks=[tensorboard]  # tensorboard callback
-    )
+    # region arch_1
 
-    tf_utils.plot_history(history, metrics=["mean_absolute_error"], plot_validation=True)
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
 
-    y_pred = myo_cnn.predict(db_test)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
 
-    # re-extract y_test from tf.Dataset because they were subsampled by the sliding window
-    y_test = tf_utils.get_db_elems_labels(db_test)
-    test_mse = tf.reduce_mean(tf.keras.metrics.mean_absolute_error(y_test, y_pred)).numpy()
-    fig = quick_visualize_vec(y_test, y_pred, title="y_test vs y_true, MSE = "+str(test_mse))
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
 
-    plt.plot()
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(6, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
 
-    if USING_TENSORBOARD:
-        tb_sup.finalize()  # close tensorboard server
+    arch_1 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_1.summary()
 
+    # endregion
+
+    # region arch_2
+
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_2 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_2.summary()
+
+    # endregion
+
+    # region arch_3
+
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_3 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_3.summary()
+
+    # endregion
+
+    # region arch_4
+
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Conv2D(256, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(256, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_4 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_4.summary()
+
+    # endregion
+
+    # region arch_5
+
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(40, 2), strides=(20, 1), padding="valid")(x)
+
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(4, 2), strides=(2, 2), padding="valid")(x)
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_5 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_5.summary()
+
+    # endregion
+
+
+    # region Compile, fit, evalute network
+
+    arch_1 = compile_fit(arch_1, db_train, db_val, num_epochs=num_epochs,
+                         plot_history=True,
+                         model_name="cnn_1",
+                         results_dir=results_dir,
+                         use_tensorboard=use_tensorboard)
+
+    arch_2 = compile_fit(arch_2, db_train, db_val, num_epochs=num_epochs,
+                         plot_history=True,
+                         model_name="cnn_2",
+                         results_dir=results_dir,
+                         use_tensorboard=use_tensorboard)
+
+    arch_3 = compile_fit(arch_3, db_train, db_val, num_epochs=num_epochs,
+                         plot_history=True,
+                         model_name="cnn_3",
+                         results_dir=results_dir,
+                         use_tensorboard=use_tensorboard)
+
+    arch_4 = compile_fit(arch_4, db_train, db_val, num_epochs=num_epochs,
+                         plot_history=True,
+                         model_name="cnn_4",
+                         results_dir=results_dir,
+                         use_tensorboard=use_tensorboard)
+
+    arch_5 = compile_fit(arch_5, db_train, db_val, num_epochs=num_epochs,
+                         plot_history=True,
+                         model_name="cnn_5",
+                         results_dir=results_dir,
+                         use_tensorboard=use_tensorboard)
+
+    # y_pred = model.predict(db_test)
+    #
+    # # re-extract y_test from tf.Dataset because they were subsampled by the sliding window
+    # y_test = tf_utils.get_db_elems_labels(db_test)
+    # test_mse = tf.reduce_mean(tf.keras.metrics.mean_absolute_error(y_test, y_pred)).numpy()
+    # fig = quick_visualize_vec(y_test, y_pred,
+    #                           title="y_test vs y_true, MSE = " + str(test_mse))
     # endregion
 
 
