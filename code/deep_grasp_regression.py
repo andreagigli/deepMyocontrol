@@ -9,7 +9,7 @@ Ameri, Ali, et al. "Regression convolutional neural network for improved simulta
 EMG control." Journal of neural engineering 16.3 (2019): 036015.
 
 example call:
-python deep_grasp_regression.py --datapath ..\data\S010_ex1.mat --algo cnn --nepochs 20 --window 400 --stride 20 --shuffle True --saveoutput ..\results
+python deep_grasp_regression.py --datapath ..\data\S010_ex1.mat --algo cnn --nepochs 20 --window 400 --stride 20 --shuffle True --saveoutput ..\results\testi
 """
 
 import argparse
@@ -28,6 +28,7 @@ from sklearn.metrics import r2_score, explained_variance_score, mean_absolute_er
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
+from sklearn.preprocessing import OneHotEncoder
 from scipy import signal
 import tensorflow as tf
 from multiprocessing import Process
@@ -127,6 +128,7 @@ def load_megane_database(fname, variable_names, train_reps, test_reps, subsample
     data = loadmat(fname, variable_names=variable_names[:])
 
     # preprocessing
+    # data["emg"] = np.random.rand(data["emg"].shape[0],data["emg"].shape[1])  # TODO: remove! just for debug!
     data["emg"] = preprocess(data["emg"], feature_set=feature_set)
 
     # feature extraction
@@ -429,18 +431,28 @@ def idxmask2binmask(m, coeff=1):
 # region functions misc
 
 
-def generate_mock_binary_clf_database(n_samples, n_features):
+def generate_mock_binary_clf_database(n_samples, n_features, n_classes=2, randomicity=False):
     """ Generate a mock database for binary classification
     """
 
+    n_classes += 1  # in myocontrol we have c classes + rest
+
     X, y = make_classification(n_samples=n_samples, n_features=n_features,
-                               random_state=1, n_classes=2)
-    y = y[:, None]
-    y = np.hstack((y, 1 - y))
+                               random_state=1, n_classes=n_classes,
+                               n_informative=n_classes)
+    if randomicity:
+        X = np.random.rand(X.shape[0], X.shape[1])
+
+    y = np.atleast_1d(y)
+    if len(y.shape) == 1:
+        y = y[:,None]
+    y = OneHotEncoder(drop='first').fit_transform(y).toarray()
+
     x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.33,
                                                         shuffle=False)
     kf = KFold(n_splits=3)
     cv_splits = list(kf.split(x_train, y_train))
+
     return x_train, x_test, y_train, y_test, cv_splits
 
 
@@ -612,6 +624,7 @@ def compile_fit(model, db_train, db_val, num_epochs=20,
         tb_sup = TensorboardSupervisor(out_dir_name)  # run tensorboard server
         tensorboard = TensorBoard(out_dir_name,
                                   update_freq="epoch",
+                                  histogram_freq=1,
                                   profile_batch=0)  # define callback for client
         callbacks = [tensorboard]
     else:
@@ -623,6 +636,7 @@ def compile_fit(model, db_train, db_val, num_epochs=20,
         metrics=[tf.keras.metrics.MeanAbsoluteError()],
     )
 
+    print(f"************** Fitting model {model_name} **************")
     history = model.fit(
         x=db_train,
         epochs=num_epochs,
@@ -782,7 +796,12 @@ def main():
     # load data
     if args.datapath == "dummydb":  # generate dummy database
         x_train, x_test, y_train, y_test, cv_splits = \
-            generate_mock_binary_clf_database(n_samples=10000, n_features=12)
+            generate_mock_binary_clf_database(n_samples=1000000, n_features=12,
+                                              n_classes=6, randomicity=False)
+    elif args.datapath == "dummyranddb":  # generate dummy database
+        x_train, x_test, y_train, y_test, cv_splits = \
+            generate_mock_binary_clf_database(n_samples=1000000, n_features=12,
+                                              n_classes=6, randomicity=True)
     else:  # load megane pro database
         fields = ["regrasp", "regrasprepetition", "reobject", "reposition", "redynamic",
                   "emg", "ts"]
@@ -820,7 +839,7 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    quick_visualize_img_tf_db_unbatched(db_val, num_images=10)  # for debug
+    # quick_visualize_img_tf_db_unbatched(db_val, num_images=10)  # for debug
     db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_val = db_val.shuffle(buffer_size=shuffle_buffer_size, seed=1)
@@ -833,7 +852,7 @@ def main():
         output_types=(tf.float32, tf.float32),
         output_shapes=(tf.TensorShape([w_len, n_features]), n_targets),
         args=args_window_fn)
-    quick_visualize_img_tf_db_unbatched(db_test, num_images=10)  # for debug
+    # quick_visualize_img_tf_db_unbatched(db_test, num_images=10)  # for debug
     db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_test = db_test.shuffle(buffer_size=shuffle_buffer_size, seed=1)
@@ -935,6 +954,7 @@ def main():
     # endregion
 
     # region arch_2
+    # same as arch_1 but with bigger FC
 
     # define model
     myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
@@ -957,6 +977,7 @@ def main():
     # endregion
 
     # region arch_3
+    # same as arch_2 but with more layers
 
     # define model
     myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
@@ -983,6 +1004,7 @@ def main():
     # endregion
 
     # region arch_4
+    # same as arch_2 but with deeper layers
 
     # define model
     myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
@@ -1005,6 +1027,7 @@ def main():
     # endregion
 
     # region arch_5
+    # same as arch_2 but with rectangular pooling
 
     # define model
     myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
