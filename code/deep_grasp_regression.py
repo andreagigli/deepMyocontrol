@@ -9,7 +9,7 @@ Ameri, Ali, et al. "Regression convolutional neural network for improved simulta
 EMG control." Journal of neural engineering 16.3 (2019): 036015.
 
 example call:
-python deep_grasp_regression.py --datapath ..\data\S010_ex1.mat --algo cnn --nepochs 20 --window 400 --stride 20 --shuffle True --saveoutput ..\results\testi
+python deep_grasp_regression.py --datapath ..\data\S010_ex1.mat --algo cnn --nepochs 20 --window 400 --stride 20 --shuffle no --saveoutput ..\results\testi
 """
 
 import argparse
@@ -465,7 +465,7 @@ def generate_mock_binary_clf_database(n_samples, n_features, n_classes=2, random
 
     y = np.atleast_1d(y)
     if len(y.shape) == 1:
-        y = y[:,None]
+        y = y[:, None]
     y = OneHotEncoder(drop='first').fit_transform(y).toarray()
 
     x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.33,
@@ -483,7 +483,7 @@ def binlabel2declabel(l_bin):
     l_bin = np.atleast_2d(l_bin)
     if l_bin.shape[0] == 1:
         l_bin = l_bin[:, None]
-    l_dec = np.sum(np.multiply(l_bin,2**np.arange(l_bin.shape[1])[::-1]), axis=1)[:,None]
+    l_dec = np.sum(np.multiply(l_bin, 2 ** np.arange(l_bin.shape[1])[::-1]), axis=1)[:, None]
 
     return l_dec
 
@@ -565,6 +565,7 @@ def quick_visualize_img_tf_db_unbatched(dataset, num_images=5):
         plt.imshow(next(gen)[0], aspect="auto")
 
     return fig
+
 
 # endregion
 
@@ -663,7 +664,7 @@ def compile_fit(model, db_train, db_val, num_epochs=20,
 
     model.compile(
         loss=tf.keras.losses.MeanSquaredError(),
-        optimizer=tf.keras.optimizers.RMSprop(),
+        optimizer=tf.keras.optimizers.Adam(),
         metrics=[tf.keras.metrics.MeanAbsoluteError()],
     )
 
@@ -694,11 +695,13 @@ def predict_evaluate_model(model, db_test):
 
     y_pred = model.predict(db_test)
     _, y_test = tf_utils.get_db_elems_labels(db_test)
-    mae = np.mean(np.abs(y_test-y_pred), axis=0)
+    mae = np.mean(np.abs(y_test - y_pred), axis=0)
 
     return y_pred, mae
 
+
 # endregion
+
 
 
 def main():
@@ -726,8 +729,9 @@ def main():
     parser.add_argument("--subsamplerate", required=False, default=1, type=int,
                         help="how much to subsample the training set. A value v corresponds"
                              "to a subsampling of 1:v. Default: 1.")
-    parser.add_argument("--shuffle", required=False, default=False, type=bool,
-                        help="whether to shuffle the data or not. Default: False.")
+    parser.add_argument("--shuffle", required=False, default="no", choices=["yes", "no"],
+                        help="whether to shuffle the training samples (yes/no). "
+                             "Default: no")
     # features args
     parser.add_argument("--featureset", required=False, default="raw",
                         help='which feature set to use, for example raw, im (interactive '
@@ -826,14 +830,6 @@ def main():
     num_epochs = args.nepochs
     results_dir = args.saveoutput
 
-    # if args.saveoutput:
-    #     out_dirname = os.path.join(args.saveoutput, db_suffix.replace("_", "")) + "\\"
-    #     out_fname = out_dirname + \
-    #                 feature_suffix + scaling_suffix + xtransform_suffix + \
-    #                 ytransform_suffix + hypopt_suffix + algo_suffix
-    #     Path(out_dirname).mkdir(parents=True, exist_ok=True)
-    #     sys.stdout = open(out_fname + "console.txt", "w")  # redirect console to file
-
     # endregion
 
     # region load and process data
@@ -853,7 +849,7 @@ def main():
         x_train, y_train, x_test, y_test, cv_splits = \
             load_megane_database(args.datapath, fields, train_reps, test_reps,
                                  args.subsamplerate, feature_set,
-                                 rebalance_classes=(args.rebalanceclasses=="yes"))
+                                 rebalance_classes=(args.rebalanceclasses == "yes"))
 
     x_val = x_train[cv_splits[0][1]]
     y_val = y_train[cv_splits[0][1]]
@@ -864,6 +860,7 @@ def main():
     n_features = x_train.shape[1]
     n_targets = y_train.shape[1]
     batch_size = 128
+    shuffle_data = (args.shuffle == "yes")
     shuffle_buffer_size = 1000
 
     args_window_fn = [x_train, y_train, w_len, w_stride]  # arguments of the generator fn
@@ -874,7 +871,7 @@ def main():
         args=args_window_fn)
     # quick_visualize_img_tf_db_unbatched(db_train, num_images=10)  # for debug
     db_train = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
-    if args.shuffle:
+    if shuffle_data:
         db_train = db_train.shuffle(buffer_size=shuffle_buffer_size, seed=1)
     # num_complete_batches_train = tf_utils.get_db_shape(db_train, batched=False)[0] // batch_size
     db_train = db_train.batch(batch_size)
@@ -887,7 +884,7 @@ def main():
         args=args_window_fn)
     # quick_visualize_img_tf_db_unbatched(db_val, num_images=10)  # for debug
     db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
-    if args.shuffle:
+    if shuffle_data:
         db_val = db_val.shuffle(buffer_size=shuffle_buffer_size, seed=1)
     # num_complete_batches_val = tf_utils.get_db_shape(db_val, batched=False)[0] // batch_size
     db_val = db_val.batch(batch_size)
@@ -900,7 +897,7 @@ def main():
         args=args_window_fn)
     # quick_visualize_img_tf_db_unbatched(db_test, num_images=10)  # for debug
     db_test = db_test.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
-    if args.shuffle:
+    if shuffle_data:
         db_test = db_test.shuffle(buffer_size=shuffle_buffer_size, seed=1)
     db_test = db_test.batch(batch_size)
 
@@ -909,19 +906,17 @@ def main():
     # region compute baseline prediction
 
     # baseline = predicting mean value for each dof of the training data
-    m = np.mean(np.vstack([y for _, y in db_train]), axis=0)[None,:]
+    m = np.mean(np.vstack([y for _, y in db_train]), axis=0)[None, :]
     pred_shape = tf_utils.get_db_shape(db_test, batched=True)[1]
     bsl_pred = np.multiply(np.ones(pred_shape), m)
     _, y_test = tf_utils.get_db_elems_labels(db_test)
-    bsl_mae = np.mean(np.abs(y_test-bsl_pred), axis=0)
+    bsl_mae = np.mean(np.abs(y_test - bsl_pred), axis=0)
 
     # endregion
-
 
     # region MLP
 
     # endregion
-
 
     # region CNN regression (inspired by VGG16, built incrementally)
 
@@ -983,7 +978,7 @@ def main():
     x = tf.keras.layers.Dense(6, activation="relu", name="FC1")(x)
     myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
 
-    arch_ameri = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_ameri = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="cnn_ameri")
     arch_ameri.summary()
 
     # endregion
@@ -1005,7 +1000,7 @@ def main():
     x = tf.keras.layers.Dense(6, activation="relu")(x)
     myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
 
-    arch_1 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_1 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="arch_1")
     arch_1.summary()
 
     # endregion
@@ -1028,7 +1023,7 @@ def main():
     x = tf.keras.layers.Dense(100, activation="relu")(x)
     myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
 
-    arch_2 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_2 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="arch_2")
     arch_2.summary()
 
     # endregion
@@ -1055,7 +1050,7 @@ def main():
     x = tf.keras.layers.Dense(100, activation="relu")(x)
     myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
 
-    arch_3 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_3 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="arch_3")
     arch_3.summary()
 
     # endregion
@@ -1078,7 +1073,7 @@ def main():
     x = tf.keras.layers.Dense(100, activation="relu")(x)
     myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
 
-    arch_4 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_4 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="arch_4")
     arch_4.summary()
 
     # endregion
@@ -1101,116 +1096,39 @@ def main():
     x = tf.keras.layers.Dense(100, activation="relu")(x)
     myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
 
-    arch_5 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_5 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="arch_5")
     arch_5.summary()
 
     # endregion
 
     # endregion
 
+    models = [arch_1, arch_2, arch_3, arch_4, arch_5]
 
     # region compile and fit
 
-    arch_1 = compile_fit(arch_1, db_train, db_val, num_epochs=num_epochs,
-                         plot_history=True,
-                         model_name="cnn_1",
-                         results_dir=results_dir,
-                         use_tensorboard=use_tensorboard)
-
-    arch_2 = compile_fit(arch_2, db_train, db_val, num_epochs=num_epochs,
-                         plot_history=True,
-                         model_name="cnn_2",
-                         results_dir=results_dir,
-                         use_tensorboard=use_tensorboard)
-
-    arch_3 = compile_fit(arch_3, db_train, db_val, num_epochs=num_epochs,
-                         plot_history=True,
-                         model_name="cnn_3",
-                         results_dir=results_dir,
-                         use_tensorboard=use_tensorboard)
-
-    arch_4 = compile_fit(arch_4, db_train, db_val, num_epochs=num_epochs,
-                         plot_history=True,
-                         model_name="cnn_4",
-                         results_dir=results_dir,
-                         use_tensorboard=use_tensorboard)
-
-    arch_5 = compile_fit(arch_5, db_train, db_val, num_epochs=1,
-                         plot_history=True,
-                         model_name="cnn_5",
-                         results_dir=results_dir,
-                         use_tensorboard=use_tensorboard)
+    for m in range(len(models)):
+        models[m] = compile_fit(models[m], db_train, db_val, num_epochs=num_epochs,
+                                plot_history=True,
+                                model_name=models[m].name,
+                                results_dir=results_dir,
+                                use_tensorboard=use_tensorboard)
 
     # endregion
-
 
     # region evaluate the model
 
-    y_pred_arch_1, mae_arch_1 = predict_evaluate_model(arch_1, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_1,f"y_test vs y_pred, arch_5, mae={mae_arch_1}")
-    quick_visualize_vec(y_test,y_pred_arch_1,title=f"y_test vs y_pred, arch_1,\n"
-                                             f"mae={mae_arch_1.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
-
-    y_pred_arch_2, mae_arch_2 = predict_evaluate_model(arch_2, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_2,f"y_test vs y_pred, arch_2, mae={mae_arch_2}")
-    quick_visualize_vec(y_test,y_pred_arch_2,title=f"y_test vs y_pred, arch_2,\n"
-                                             f"mae={mae_arch_2.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
-
-    y_pred_arch_3, mae_arch_3 = predict_evaluate_model(arch_3, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_3,f"y_test vs y_pred, arch_3, mae={mae_arch_3}")
-    quick_visualize_vec(y_test,y_pred_arch_3,title=f"y_test vs y_pred, arch_3,\n"
-                                             f"mae={mae_arch_3.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
-
-    y_pred_arch_4, mae_arch_4 = predict_evaluate_model(arch_4, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_4,f"y_test vs y_pred, arch_4, mae={mae_arch_4}")
-    quick_visualize_vec(y_test,y_pred_arch_4,title=f"y_test vs y_pred, arch_4,\n"
-                                             f"mae={mae_arch_4.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
-
-    y_pred_arch_5, mae_arch_5 = predict_evaluate_model(arch_5, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_5,f"y_test vs y_pred, arch_5, mae={mae_arch_5}")
-    quick_visualize_vec(y_test,y_pred_arch_5,title=f"y_test vs y_pred, arch_5,\n"
-                                             f"mae={mae_arch_5.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
+    for m in range(len(models)):
+        y_pred, mae = predict_evaluate_model(models[m], db_test)
+        fig = quick_visualize_vec(y_test, y_pred, title=f"y_test vs y_pred, {models[m].name},\n"
+                                                        f"mae={mae.ravel()}\n"
+                                                        f"bsl_mae={bsl_mae.ravel()}\n")
+        fig = quick_visualize_vec(bsl_pred, continue_on_fig=fig)
+        if results_dir is not None:
+            fig.savefig(os.path.join(results_dir, f"pred_{models[m].name}.png"), format="png")
 
     # endregion
 
-
-    # region evaluate the model
-
-    y_pred_arch_1, mae_arch_1 = predict_evaluate_model(arch_1, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_1,title=f"y_test vs y_pred, arch_1,\n"
-                                             f"mae={mae_arch_1.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
-
-    y_pred_arch_2, mae_arch_2 = predict_evaluate_model(arch_2, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_2,f"y_test vs y_pred, arch_2, mae={mae_arch_2:%.3f}")
-    quick_visualize_vec(y_test,y_pred_arch_2,title=f"y_test vs y_pred, arch_2,\n"
-                                             f"mae={mae_arch_2.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
-
-    y_pred_arch_3, mae_arch_3 = predict_evaluate_model(arch_3, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_3,f"y_test vs y_pred, arch_3, mae={mae_arch_3:%.3f}")
-    quick_visualize_vec(y_test,y_pred_arch_3,title=f"y_test vs y_pred, arch_3,\n"
-                                             f"mae={mae_arch_3.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
-
-    y_pred_arch_4, mae_arch_4 = predict_evaluate_model(arch_4, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_4,f"y_test vs y_pred, arch_4, mae={mae_arch_4:%.3f}")
-    quick_visualize_vec(y_test,y_pred_arch_4,title=f"y_test vs y_pred, arch_4,\n"
-                                             f"mae={mae_arch_4.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
-
-    y_pred_arch_5, mae_arch_5 = predict_evaluate_model(arch_5, db_test)
-    quick_visualize_vec(y_test,y_pred_arch_5,f"y_test vs y_pred, arch_5, mae={mae_arch_5:%.3f}")
-    quick_visualize_vec(y_test,y_pred_arch_5,title=f"y_test vs y_pred, arch_5,\n"
-                                             f"mae={mae_arch_5.ravel()}\n"
-                                             f"bsl_mae={bsl_mae.ravel()}")
-
-    # endregion
 
 
 if __name__ == "__main__":
