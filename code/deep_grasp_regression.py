@@ -988,100 +988,100 @@ def main():
 
     # endregion
 
-    # # region arch_1
-    #
-    # # define model
-    # myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
-    #
-    # x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
-    # x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
-    #
-    # x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
-    #
-    # x = tf.keras.layers.Flatten()(x)
-    # x = tf.keras.layers.Dense(6, activation="relu")(x)
-    # myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
-    #
-    # arch_1 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
-    # arch_1.summary()
-    #
-    # # endregion
-    #
-    # # region arch_2
-    # # same as arch_1 but with bigger FC
-    #
-    # # define model
-    # myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
-    #
-    # x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
-    # x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
-    #
-    # x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
-    #
-    # x = tf.keras.layers.Flatten()(x)
-    # x = tf.keras.layers.Dense(100, activation="relu")(x)
-    # myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
-    #
-    # arch_2 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
-    # arch_2.summary()
-    #
-    # # endregion
-    #
-    # # region arch_3
-    # # same as arch_2 but with more layers
-    #
-    # # define model
-    # myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
-    #
-    # x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
-    # x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
-    #
-    # x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
-    #
-    # x = tf.keras.layers.Flatten()(x)
-    # x = tf.keras.layers.Dense(100, activation="relu")(x)
-    # myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
-    #
-    # arch_3 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
-    # arch_3.summary()
-    #
-    # # endregion
-    #
-    # # region arch_4
-    # # same as arch_2 but with deeper layers
-    #
-    # # define model
-    # myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
-    #
-    # x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(myo_cnn_in)
-    # x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
-    #
-    # x = tf.keras.layers.Conv2D(256, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.Conv2D(256, 3, activation="relu", padding="same")(x)
-    # x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
-    #
-    # x = tf.keras.layers.Flatten()(x)
-    # x = tf.keras.layers.Dense(100, activation="relu")(x)
-    # myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
-    #
-    # arch_4 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
-    # arch_4.summary()
-    #
-    # # endregion
+    # region arch_1
+
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(6, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_1 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_1.summary()
+
+    # endregion
+
+    # region arch_2
+    # same as arch_1 but with bigger FC
+
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_2 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_2.summary()
+
+    # endregion
+
+    # region arch_3
+    # same as arch_2 but with more layers
+
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(16, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(32, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_3 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_3.summary()
+
+    # endregion
+
+    # region arch_4
+    # same as arch_2 but with deeper layers
+
+    # define model
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(myo_cnn_in)
+    x = tf.keras.layers.Conv2D(64, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Conv2D(256, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.Conv2D(256, 3, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding="same")(x)
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_4 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="myocnn")
+    arch_4.summary()
+
+    # endregion
 
     # region arch_5
     # same as arch_2 but with rectangular pooling
@@ -1111,29 +1111,29 @@ def main():
 
     # region compile and fit
 
-    # arch_1 = compile_fit(arch_1, db_train, db_val, num_epochs=num_epochs,
-    #                      plot_history=True,
-    #                      model_name="cnn_1",
-    #                      results_dir=results_dir,
-    #                      use_tensorboard=use_tensorboard)
-    #
-    # arch_2 = compile_fit(arch_2, db_train, db_val, num_epochs=num_epochs,
-    #                      plot_history=True,
-    #                      model_name="cnn_2",
-    #                      results_dir=results_dir,
-    #                      use_tensorboard=use_tensorboard)
-    #
-    # arch_3 = compile_fit(arch_3, db_train, db_val, num_epochs=num_epochs,
-    #                      plot_history=True,
-    #                      model_name="cnn_3",
-    #                      results_dir=results_dir,
-    #                      use_tensorboard=use_tensorboard)
-    #
-    # arch_4 = compile_fit(arch_4, db_train, db_val, num_epochs=num_epochs,
-    #                      plot_history=True,
-    #                      model_name="cnn_4",
-    #                      results_dir=results_dir,
-    #                      use_tensorboard=use_tensorboard)
+    arch_1 = compile_fit(arch_1, db_train, db_val, num_epochs=num_epochs,
+                         plot_history=True,
+                         model_name="cnn_1",
+                         results_dir=results_dir,
+                         use_tensorboard=use_tensorboard)
+
+    arch_2 = compile_fit(arch_2, db_train, db_val, num_epochs=num_epochs,
+                         plot_history=True,
+                         model_name="cnn_2",
+                         results_dir=results_dir,
+                         use_tensorboard=use_tensorboard)
+
+    arch_3 = compile_fit(arch_3, db_train, db_val, num_epochs=num_epochs,
+                         plot_history=True,
+                         model_name="cnn_3",
+                         results_dir=results_dir,
+                         use_tensorboard=use_tensorboard)
+
+    arch_4 = compile_fit(arch_4, db_train, db_val, num_epochs=num_epochs,
+                         plot_history=True,
+                         model_name="cnn_4",
+                         results_dir=results_dir,
+                         use_tensorboard=use_tensorboard)
 
     arch_5 = compile_fit(arch_5, db_train, db_val, num_epochs=1,
                          plot_history=True,
@@ -1181,28 +1181,28 @@ def main():
 
     # region evaluate the model
 
-    # y_pred_arch_1, mae_arch_1 = predict_evaluate_model(arch_1, db_test)
-    # quick_visualize_vec(y_test,y_pred_arch_1,title=f"y_test vs y_pred, arch_1,\n"
-    #                                          f"mae={mae_arch_1.ravel()}\n"
-    #                                          f"bsl_mae={bsl_mae.ravel()}")
-    #
-    # y_pred_arch_2, mae_arch_2 = predict_evaluate_model(arch_2, db_test)
-    # quick_visualize_vec(y_test,y_pred_arch_2,f"y_test vs y_pred, arch_2, mae={mae_arch_2:%.3f}")
-    # quick_visualize_vec(y_test,y_pred_arch_2,title=f"y_test vs y_pred, arch_2,\n"
-    #                                          f"mae={mae_arch_2.ravel()}\n"
-    #                                          f"bsl_mae={bsl_mae.ravel()}")
-    #
-    # y_pred_arch_3, mae_arch_3 = predict_evaluate_model(arch_3, db_test)
-    # quick_visualize_vec(y_test,y_pred_arch_3,f"y_test vs y_pred, arch_3, mae={mae_arch_3:%.3f}")
-    # quick_visualize_vec(y_test,y_pred_arch_3,title=f"y_test vs y_pred, arch_3,\n"
-    #                                          f"mae={mae_arch_3.ravel()}\n"
-    #                                          f"bsl_mae={bsl_mae.ravel()}")
-    #
-    # y_pred_arch_4, mae_arch_4 = predict_evaluate_model(arch_4, db_test)
-    # quick_visualize_vec(y_test,y_pred_arch_4,f"y_test vs y_pred, arch_4, mae={mae_arch_4:%.3f}")
-    # quick_visualize_vec(y_test,y_pred_arch_4,title=f"y_test vs y_pred, arch_4,\n"
-    #                                          f"mae={mae_arch_4.ravel()}\n"
-    #                                          f"bsl_mae={bsl_mae.ravel()}")
+    y_pred_arch_1, mae_arch_1 = predict_evaluate_model(arch_1, db_test)
+    quick_visualize_vec(y_test,y_pred_arch_1,title=f"y_test vs y_pred, arch_1,\n"
+                                             f"mae={mae_arch_1.ravel()}\n"
+                                             f"bsl_mae={bsl_mae.ravel()}")
+
+    y_pred_arch_2, mae_arch_2 = predict_evaluate_model(arch_2, db_test)
+    quick_visualize_vec(y_test,y_pred_arch_2,f"y_test vs y_pred, arch_2, mae={mae_arch_2:%.3f}")
+    quick_visualize_vec(y_test,y_pred_arch_2,title=f"y_test vs y_pred, arch_2,\n"
+                                             f"mae={mae_arch_2.ravel()}\n"
+                                             f"bsl_mae={bsl_mae.ravel()}")
+
+    y_pred_arch_3, mae_arch_3 = predict_evaluate_model(arch_3, db_test)
+    quick_visualize_vec(y_test,y_pred_arch_3,f"y_test vs y_pred, arch_3, mae={mae_arch_3:%.3f}")
+    quick_visualize_vec(y_test,y_pred_arch_3,title=f"y_test vs y_pred, arch_3,\n"
+                                             f"mae={mae_arch_3.ravel()}\n"
+                                             f"bsl_mae={bsl_mae.ravel()}")
+
+    y_pred_arch_4, mae_arch_4 = predict_evaluate_model(arch_4, db_test)
+    quick_visualize_vec(y_test,y_pred_arch_4,f"y_test vs y_pred, arch_4, mae={mae_arch_4:%.3f}")
+    quick_visualize_vec(y_test,y_pred_arch_4,title=f"y_test vs y_pred, arch_4,\n"
+                                             f"mae={mae_arch_4.ravel()}\n"
+                                             f"bsl_mae={bsl_mae.ravel()}")
 
     y_pred_arch_5, mae_arch_5 = predict_evaluate_model(arch_5, db_test)
     quick_visualize_vec(y_test,y_pred_arch_5,f"y_test vs y_pred, arch_5, mae={mae_arch_5:%.3f}")
