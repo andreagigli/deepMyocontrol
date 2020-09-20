@@ -37,7 +37,7 @@ def create_sliding_window_generator(data, label, w_len, w_stride=1):
 # region dataset info
 
 
-def get_db_elems_labels(dataset):
+def get_db_elems_labels(dataset, discard_last_batch=True):
     """ Return elements and labels of a Tensorflow dataset as numpy arrays.
 
     It works both for un-batched and batched datasets.
@@ -64,16 +64,31 @@ def get_db_elems_labels(dataset):
         return elems, labels
 
 
-def get_unbatched_db_shape(dataset):
+def get_db_shape(dataset, batched=False):
     """ Computes the number of elements and their shape.
+    Returns dataset shape as (num_el, shape each element).
+
+    Different computation for batched or unbatched dataset.
     """
 
-    shape = dataset.as_numpy_iterator().next()[0].shape
-    num_el = 0
-    for _ in dataset.as_numpy_iterator():
-        num_el = num_el + 1
+    if batched:
+        num_el = 0
+        for el in dataset:
+            num_el += el[0].shape[0]
+        el = next(dataset.as_numpy_iterator())
+        el_size = (el[0][0].shape, el[1][0].shape)
+        dataset_shape = ((num_el,) + el_size[0], (num_el,) + el_size[1])
+    else:  # unbatched dataset
+        num_el = 0
+        for _ in dataset.as_numpy_iterator():
+            num_el = num_el + 1
+        first_el = next(dataset.as_numpy_iterator())
+        dataset_shape = [(num_el,) + first_el[0].shape]  # shape x
+        if len(first_el) == 2:
+            dataset_shape.append((num_el,) + first_el[1].shape)  # shape y
 
-    return num_el, shape
+    return dataset_shape
+
 
 # endregion
 

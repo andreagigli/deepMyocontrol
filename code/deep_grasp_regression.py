@@ -19,16 +19,13 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import figaspect
-from pathlib import Path
 from scipy.io import loadmat
 from scipy.signal import lfilter, butter
-from sklearn.preprocessing import FunctionTransformer
-from sklearn.metrics import r2_score, explained_variance_score, mean_absolute_error, \
-    mean_squared_error
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import OneHotEncoder
+from imblearn.under_sampling import RandomUnderSampler
 from scipy import signal
 import tensorflow as tf
 from multiprocessing import Process
@@ -121,7 +118,7 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
 
 
 def load_megane_database(fname, variable_names, train_reps, test_reps, subsamplerate=1,
-                         feature_set=[], w_len=1, w_stride=1):
+                         feature_set=[], w_len=1, w_stride=1, rebalance_classes=False):
     """ Load the desired fields (variable_names) from the megane pro database
     """
 
@@ -152,6 +149,9 @@ def load_megane_database(fname, variable_names, train_reps, test_reps, subsample
             data["redynamic"], w_dim=w_len, stride=w_stride)
 
     data["regrasp"] = convert_label(data["regrasp"])
+
+    if rebalance_classes:
+        data = rebalance_classes_meganepro(data)
 
     # split database
     x_train, y_train, x_test, y_test, cv_splits = split_data(data, train_reps,
@@ -259,6 +259,27 @@ def convert_label(label):
     for i in range(len(label)):
         regression_label[i] = actions_dict.get(label[i][0])
     return regression_label
+
+
+def rebalance_classes_meganepro(data):
+    """ Rebalance dataset based on random undersampling.
+    """
+
+    y = binlabel2declabel(data["regrasp"])
+
+    rus = RandomUnderSampler(random_state=0)
+    rus.fit_resample(data["emg"], y)
+    idx = np.sort(rus.sample_indices_)
+
+    data["emg"] = data["emg"][idx, :]
+    data["regrasp"] = data["regrasp"][idx, :]
+    data["regrasprepetition"] = data["regrasprepetition"][idx, :]
+    data["ts"] = data["ts"][idx, :]
+    data["reobject"] = data["reobject"][idx, :]
+    data["reposition"] = data["reposition"][idx, :]
+    data["redynamic"] = data["redynamic"][idx, :]
+
+    return data
 
 
 def split_data(data, train_reps, test_reps, debug_plot=False, subsamplerate=1):
@@ -430,7 +451,6 @@ def idxmask2binmask(m, coeff=1):
 
 # region functions misc
 
-
 def generate_mock_binary_clf_database(n_samples, n_features, n_classes=2, randomicity=False):
     """ Generate a mock database for binary classification
     """
@@ -454,6 +474,18 @@ def generate_mock_binary_clf_database(n_samples, n_features, n_classes=2, random
     cv_splits = list(kf.split(x_train, y_train))
 
     return x_train, x_test, y_train, y_test, cv_splits
+
+
+def binlabel2declabel(l_bin):
+    """ Converts np.array([[0,1,0],[1,0,0],[1,0,0],[0,1,1]]) --> np.array([[2],[4],[4],[3]])
+    """
+
+    l_bin = np.atleast_2d(l_bin)
+    if l_bin.shape[0] == 1:
+        l_bin = l_bin[:, None]
+    l_dec = np.sum(np.multiply(l_bin,2**np.arange(l_bin.shape[1])[::-1]), axis=1)[:,None]
+
+    return l_dec
 
 
 def quick_visualize_vec(data, overlay_data=None, title="", continue_on_fig=None, x_axis=None):
@@ -533,7 +565,6 @@ def quick_visualize_img_tf_db_unbatched(dataset, num_images=5):
         plt.imshow(next(gen)[0], aspect="auto")
 
     return fig
-
 
 # endregion
 
@@ -657,6 +688,16 @@ def compile_fit(model, db_train, db_val, num_epochs=20,
     return model
 
 
+def predict_evaluate_model(model, db_test):
+    """ Use the model to predict db_test.
+    """
+
+    y_pred = model.predict(db_test)
+    _, y_test = tf_utils.get_db_elems_labels(db_test)
+    mae = np.mean(np.abs(y_test-y_pred), axis=0)
+
+    return y_pred, mae
+
 # endregion
 
 
@@ -670,6 +711,10 @@ def main():
                         help="path to the database. If nothing is give, generate"
                              "dummy database. The path must be relative to the "
                              ".py script. Ex: path\\fname.mat.")
+    parser.add_argument("--rebalanceclasses", required=False, default="no",
+                        choices=["yes", "no"],
+                        help="whether to rebalance training classes or not (yes/no). "
+                             "Default: yes")
     parser.add_argument("--trainreps", required=False, default="1 2 3",
                         help="training repetitions (from 1 to 4). Ex: 1 2 3")
     parser.add_argument("--testreps", required=False, default="4",
@@ -807,7 +852,8 @@ def main():
                   "emg", "ts"]
         x_train, y_train, x_test, y_test, cv_splits = \
             load_megane_database(args.datapath, fields, train_reps, test_reps,
-                                 args.subsamplerate, feature_set)
+                                 args.subsamplerate, feature_set,
+                                 rebalance_classes=(args.rebalanceclasses=="yes"))
 
     x_val = x_train[cv_splits[0][1]]
     y_val = y_train[cv_splits[0][1]]
@@ -830,7 +876,7 @@ def main():
     db_train = db_train.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_train = db_train.shuffle(buffer_size=shuffle_buffer_size, seed=1)
-    # num_complete_batches_train = tf_utils.get_unbatched_db_shape(db_train)[0] // batch_size
+    # num_complete_batches_train = tf_utils.get_db_shape(db_train, batched=False)[0] // batch_size
     db_train = db_train.batch(batch_size)
 
     args_window_fn = [x_val, y_val, w_len, w_stride]
@@ -843,7 +889,7 @@ def main():
     db_val = db_val.map(lambda x, y: (tf.expand_dims(x, axis=-1), y))
     if args.shuffle:
         db_val = db_val.shuffle(buffer_size=shuffle_buffer_size, seed=1)
-    # num_complete_batches_val = tf_utils.get_unbatched_db_shape(db_val)[0] // batch_size
+    # num_complete_batches_val = tf_utils.get_db_shape(db_val, batched=False)[0] // batch_size
     db_val = db_val.batch(batch_size)
 
     args_window_fn = [x_test, y_test, w_len, w_stride]
@@ -857,6 +903,17 @@ def main():
     if args.shuffle:
         db_test = db_test.shuffle(buffer_size=shuffle_buffer_size, seed=1)
     db_test = db_test.batch(batch_size)
+
+    # endregion
+
+    # region compute baseline prediction
+
+    # baseline = predicting mean value for each dof of the training data
+    m = np.mean(np.vstack([y for _, y in db_train]), axis=0)[None,:]
+    pred_shape = tf_utils.get_db_shape(db_test, batched=True)[1]
+    bsl_pred = np.multiply(np.ones(pred_shape), m)
+    _, y_test = tf_utils.get_db_elems_labels(db_test)
+    bsl_mae = np.mean(np.abs(y_test-bsl_pred), axis=0)
 
     # endregion
 
@@ -1049,8 +1106,10 @@ def main():
 
     # endregion
 
+    # endregion
 
-    # region Compile, fit, evalute network
+
+    # region compile and fit
 
     arch_1 = compile_fit(arch_1, db_train, db_val, num_epochs=num_epochs,
                          plot_history=True,
@@ -1076,19 +1135,47 @@ def main():
                          results_dir=results_dir,
                          use_tensorboard=use_tensorboard)
 
-    arch_5 = compile_fit(arch_5, db_train, db_val, num_epochs=num_epochs,
+    arch_5 = compile_fit(arch_5, db_train, db_val, num_epochs=1,
                          plot_history=True,
                          model_name="cnn_5",
                          results_dir=results_dir,
                          use_tensorboard=use_tensorboard)
 
-    # y_pred = model.predict(db_test)
-    #
-    # # re-extract y_test from tf.Dataset because they were subsampled by the sliding window
-    # y_test = tf_utils.get_db_elems_labels(db_test)
-    # test_mse = tf.reduce_mean(tf.keras.metrics.mean_absolute_error(y_test, y_pred)).numpy()
-    # fig = quick_visualize_vec(y_test, y_pred,
-    #                           title="y_test vs y_true, MSE = " + str(test_mse))
+    # endregion
+
+
+    # region evaluate the model
+
+    y_pred_arch_1, mae_arch_1 = predict_evaluate_model(arch_1, db_test)
+    quick_visualize_vec(y_test,y_pred_arch_1,f"y_test vs y_pred, arch_5, mae={mae_arch_1}")
+    quick_visualize_vec(y_test,y_pred_arch_1,title=f"y_test vs y_pred, arch_1,\n"
+                                             f"mae={mae_arch_1.ravel()}\n"
+                                             f"bsl_mae={bsl_mae.ravel()}")
+
+    y_pred_arch_2, mae_arch_2 = predict_evaluate_model(arch_2, db_test)
+    quick_visualize_vec(y_test,y_pred_arch_2,f"y_test vs y_pred, arch_2, mae={mae_arch_2}")
+    quick_visualize_vec(y_test,y_pred_arch_2,title=f"y_test vs y_pred, arch_2,\n"
+                                             f"mae={mae_arch_2.ravel()}\n"
+                                             f"bsl_mae={bsl_mae.ravel()}")
+
+    y_pred_arch_3, mae_arch_3 = predict_evaluate_model(arch_3, db_test)
+    quick_visualize_vec(y_test,y_pred_arch_3,f"y_test vs y_pred, arch_3, mae={mae_arch_3}")
+    quick_visualize_vec(y_test,y_pred_arch_3,title=f"y_test vs y_pred, arch_3,\n"
+                                             f"mae={mae_arch_3.ravel()}\n"
+                                             f"bsl_mae={bsl_mae.ravel()}")
+
+    y_pred_arch_4, mae_arch_4 = predict_evaluate_model(arch_4, db_test)
+    quick_visualize_vec(y_test,y_pred_arch_4,f"y_test vs y_pred, arch_4, mae={mae_arch_4}")
+    quick_visualize_vec(y_test,y_pred_arch_4,title=f"y_test vs y_pred, arch_4,\n"
+                                             f"mae={mae_arch_4.ravel()}\n"
+                                             f"bsl_mae={bsl_mae.ravel()}")
+
+    y_pred_arch_5, mae_arch_5 = predict_evaluate_model(arch_5, db_test)
+    quick_visualize_vec(y_test,y_pred_arch_5,f"y_test vs y_pred, arch_5, mae={mae_arch_5}")
+    quick_visualize_vec(y_test,y_pred_arch_5,title=f"y_test vs y_pred, arch_5,\n"
+                                             f"mae={mae_arch_5.ravel()}\n"
+                                             f"bsl_mae={bsl_mae.ravel()}")
+
     # endregion
 
 
