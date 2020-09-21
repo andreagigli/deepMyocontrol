@@ -4,6 +4,7 @@ Example call: python reloadmodel.py --datapath ..\data\S010_ex1.mat --modelpath 
 
 import argparse
 import os
+import time
 
 import tensorflow as tf
 import numpy as np
@@ -54,7 +55,6 @@ def main():
     feature_set = ["raw"]
     w_len = args.window
     w_stride = args.stride
-    results_dir = args.saveoutput
 
     # endregion
 
@@ -146,8 +146,8 @@ def main():
                             title=f"y_test vs y_pred, {model.name},\n"
                                   f"mae={mae.ravel()}\n"
                                   f"bsl_mae={bsl_mae.ravel()}\n")
-    if results_dir is not None:
-        fig.savefig(os.path.join(results_dir, f"pred_{model.name}.png"), format="png")
+    if args.saveoutput is not None:
+        fig.savefig(os.path.join(args.saveoutput, f"pred_{model.name}.png"), format="png")
     plt.show()
 
     # endregion

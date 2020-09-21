@@ -15,6 +15,7 @@ python deep_grasp_regression.py --datapath ..\data\S010_ex1.mat --algo cnn --nep
 import argparse
 import os
 import sys
+import time
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,7 +30,6 @@ from imblearn.under_sampling import RandomUnderSampler
 from scipy import signal
 import tensorflow as tf
 from multiprocessing import Process
-import time
 
 try:
     from tensorflow.keras.callbacks import TensorBoard
@@ -647,14 +647,12 @@ def compile_fit(model, db_train, db_val, num_epochs=20,
 
     if results_dir:
         assert model_name, "Please provide a name for the model you want to save."
-        out_dir_name = os.path.join(results_dir, f"{model_name}_{int(time.time())}")
-        os.makedirs(out_dir_name, exist_ok=True)
 
     # define tensorboard callback and run tensorboard server
     if use_tensorboard:
         assert results_dir, "To use tensorboard, please specify and output directory."
-        tb_sup = TensorboardSupervisor(out_dir_name)  # run tensorboard server
-        tensorboard = TensorBoard(out_dir_name,
+        tb_sup = TensorboardSupervisor(results_dir)  # run tensorboard server
+        tensorboard = TensorBoard(results_dir,
                                   update_freq="epoch",
                                   histogram_freq=1,
                                   profile_batch=0)  # define callback for client
@@ -664,7 +662,7 @@ def compile_fit(model, db_train, db_val, num_epochs=20,
 
     model.compile(
         loss=tf.keras.losses.MeanSquaredError(),
-        optimizer=tf.keras.optimizers.Adam(),
+        optimizer=tf.keras.optimizers.RMSprop(),
         metrics=[tf.keras.metrics.MeanAbsoluteError()],
     )
 
@@ -683,8 +681,8 @@ def compile_fit(model, db_train, db_val, num_epochs=20,
         tb_sup.finalize()  # close tensorboard server
 
     if results_dir:
-        model.save(f'{out_dir_name}')
-        # debug: reload model with model = tf.keras.models.load_model(f'{out_dir_name}\\{model_name}')
+        model.save(f'{results_dir}')
+        # debug: reload model with model = tf.keras.models.load_model(f'{results_dir}\\{model_name}')
 
     return model
 
@@ -701,7 +699,6 @@ def predict_evaluate_model(model, db_test):
 
 
 # endregion
-
 
 
 def main():
@@ -828,7 +825,6 @@ def main():
 
     use_tensorboard = USING_TENSORBOARD
     num_epochs = args.nepochs
-    results_dir = args.saveoutput
 
     # endregion
 
@@ -1101,13 +1097,27 @@ def main():
 
     # endregion
 
+    # region arch_6
+
+    # USE 1D CONVOLUTION https://www.tensorflow.org/api_docs/python/tf/keras/layers/Conv1D
+    # https://towardsdatascience.com/understanding-1d-and-3d-convolution-neural-network-keras-9d8f76e29610
+    # https://towardsdatascience.com/how-to-use-convolutional-neural-networks-for-time-series-classification-56b1b0a07a57
+
+    # endregion
+
     # endregion
 
     models = [arch_1, arch_2, arch_3, arch_4, arch_5]
+    models = [arch_5]
 
     # region compile and fit
 
     for m in range(len(models)):
+
+        if args.saveoutput:
+            results_dir = os.path.join(args.saveoutput, f"{models[m].name}_{int(time.time())}")
+            os.makedirs(results_dir, exist_ok=True)
+
         models[m] = compile_fit(models[m], db_train, db_val, num_epochs=num_epochs,
                                 plot_history=True,
                                 model_name=models[m].name,
@@ -1120,15 +1130,17 @@ def main():
 
     for m in range(len(models)):
         y_pred, mae = predict_evaluate_model(models[m], db_test)
-        fig = quick_visualize_vec(y_test, y_pred, title=f"y_test vs y_pred, {models[m].name},\n"
-                                                        f"mae={mae.ravel()}\n"
-                                                        f"bsl_mae={bsl_mae.ravel()}\n")
-        fig = quick_visualize_vec(bsl_pred, continue_on_fig=fig)
-        if results_dir is not None:
+
+        fig = quick_visualize_vec(y_test, y_pred)
+        fig = quick_visualize_vec(bsl_pred, continue_on_fig=fig,
+                                  title=f"y_test vs y_pred, {models[m].name},\n"
+                                        f"mae={mae.ravel()}\n"
+                                        f"bsl_mae={bsl_mae.ravel()}\n")
+
+        if args.saveoutput:
             fig.savefig(os.path.join(results_dir, f"pred_{models[m].name}.png"), format="png")
 
     # endregion
-
 
 
 if __name__ == "__main__":
