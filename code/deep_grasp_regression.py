@@ -1099,16 +1099,60 @@ def main():
 
     # region arch_6
 
-    # USE 1D CONVOLUTION https://www.tensorflow.org/api_docs/python/tf/keras/layers/Conv1D
-    # https://towardsdatascience.com/understanding-1d-and-3d-convolution-neural-network-keras-9d8f76e29610
+    # 1d-convolution
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Reshape((400, 12))(myo_cnn_in)
+
+    x = tf.keras.layers.Conv1D(64, 5, activation="relu", padding="same")(x)
+    x = tf.keras.layers.GlobalMaxPooling1D()(x)
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_6 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="arch_6")
+    arch_6.summary()
+
+    # endregion
+
+    # region arch_7
+
+    # multi-resolution 1d-convolution
     # https://towardsdatascience.com/how-to-use-convolutional-neural-networks-for-time-series-classification-56b1b0a07a57
+    # https: // www.tensorflow.org / guide / keras / functional  # manipulate_complex_graph_topologies
+
+    myo_cnn_in = tf.keras.Input(shape=(400, 12, 1), name="in")
+
+    x = tf.keras.layers.Reshape((400, 12))(myo_cnn_in)
+
+    x1 = tf.keras.layers.Conv1D(32, 5, dilation_rate=2, activation="relu", padding="same")(x)
+    x1 = tf.keras.layers.MaxPooling1D(400//10, 400//10//4)(x1)
+
+    x2 = tf.keras.layers.Conv1D(32, 5, dilation_rate=4, activation="relu", padding="same")(x)
+    x2 = tf.keras.layers.MaxPooling1D(400//10, 400//10//4)(x2)
+
+    x3 = tf.keras.layers.Conv1D(32, 5, dilation_rate=8, activation="relu", padding="same")(x)
+    x3 = tf.keras.layers.MaxPooling1D(400//10, 400//10//4)(x3)
+
+    x = tf.keras.layers.Concatenate(axis=1)([x1, x2, x3])
+
+    x = tf.keras.layers.Conv1D(64, 5, dilation_rate=1, activation="relu", padding="same")(x)
+    x = tf.keras.layers.MaxPooling1D(x.shape[1]//20, x.shape[1]//20//2)(x)  # 400//20//5, 400//5//10
+
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    myo_cnn_out = tf.keras.layers.Dense(6, activation="linear", name="out")(x)
+
+    arch_7 = tf.keras.Model(myo_cnn_in, myo_cnn_out, name="arch_7")
+    arch_7.summary()
 
     # endregion
 
     # endregion
 
-    models = [arch_1, arch_2, arch_3, arch_4, arch_5]
-    models = [arch_5]
+    models = [arch_1, arch_2, arch_3, arch_4, arch_5, arch_6, arch_7]
+    models = [arch_7, arch_6]
 
     # region compile and fit
 
